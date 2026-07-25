@@ -1,6 +1,6 @@
 // lib/core/navigation/main_shell.dart
 
-import 'package:bubimo/core/navigation/premium_bottom_nav_bar.dart';
+import 'package:bubimo/core/navigation/notched_nav_bar.dart';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/features/profile/presentation/pages/profile_page.dart';
 import 'package:flutter/material.dart';
@@ -21,13 +21,15 @@ import '../di/injection.dart';
 /// [IndexedStack] of the four top-level tabs: Timeline, Diary, Themes,
 /// Profile.
 ///
-/// The bottom bar is a [NotchedNavBar] — a custom-painted bar with a
-/// smooth concave notch cut into its top edge, seating a persistent
-/// floating diamond-shaped "+" FAB that always opens the diary create
-/// form (see [_openCreateEntry]), regardless of which tab is active.
-/// This mirrors the reference design: two tabs, floating FAB, two tabs.
+/// The bottom bar is a [PillNavBar] — a floating, fully-rounded
+/// icon-only capsule with a smooth concave notch cut into its top
+/// edge, seating a persistent floating diamond-shaped "+" FAB that
+/// always opens the diary create form (see [_openCreateEntry]),
+/// regardless of which tab is active. The currently active tab is
+/// highlighted by a circular pill that slides between icons. This
+/// mirrors the reference design: two tabs, floating FAB, two tabs.
 ///
-/// [NotchedNavBar] pulls all of its colors from `Theme.of(context)
+/// [PillNavBar] pulls all of its colors from `Theme.of(context)
 /// .colorScheme`, so it re-colors automatically whenever the user
 /// switches between built-in or custom themes (see
 /// `AppThemeCubit`/`theme_mapper.dart`) — no wiring needed here beyond
@@ -170,7 +172,7 @@ class _MainShellState extends State<MainShell> {
           ],
         ),
         extendBody: true,
-        bottomNavigationBar: NotchedNavBar(
+        bottomNavigationBar: PillNavBar(
           leftItems: _leftTabs,
           rightItems: _rightTabs,
           currentIndex: _currentIndex,

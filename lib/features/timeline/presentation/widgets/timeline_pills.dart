@@ -70,6 +70,7 @@ class IconPill extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        margin: label.isNotEmpty?null: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(20),
@@ -85,7 +86,7 @@ class IconPill extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 13, color: textColor),
-            const SizedBox(width: 5),
+            if (label.isNotEmpty) const SizedBox(width: 5),
             Text(
               label,
               style: TextStyle(

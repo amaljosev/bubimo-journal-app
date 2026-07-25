@@ -137,7 +137,7 @@ class _ThemeScreenState extends State<ThemeScreen>
         final activeTheme = getIt<AppThemeCubit>().currentTheme;
 
         return Scaffold(
-          appBar: myAppbar(context, 'Themes'),
+          appBar: myAppbar(context, 'Themes',null),
           body: Column(
             children: [
               if (activeTheme != null) CurrentThemeHeader(theme: activeTheme),

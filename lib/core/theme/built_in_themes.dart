@@ -14,8 +14,8 @@ import '../../../features/theme/domain/entities/theme_type.dart';
 /// `theme_id` value persisted in `app_settings`, and as
 /// [defaultBuiltInThemeId] for "Reset to Default".
 ///
-/// All but one built-in theme are Light Mode ([AppThemeData.isDark] =
-/// false); [nightfall] is the sole dark-mode built-in. [surfaceColor]
+/// Most built-in themes are Light Mode ([AppThemeData.isDark] = false);
+/// [nightfall] and [midnight] are the dark-mode built-ins. [surfaceColor]
 /// is a near-white/near-background tint for light themes (cards/app
 /// bars sit just barely above [backgroundColor]) — [nightfall] mirrors
 /// this with a near-black/near-background tint instead. [textColor] is
@@ -30,6 +30,7 @@ class BuiltInThemes {
   static const String sunsetId = 'builtin_sunset';
   static const String bloomId = 'builtin_bloom';
   static const String nightfallId = 'builtin_nightfall';
+  static const String midnightId = 'builtin_midnight';
 
   /// The theme "Reset to Default" applies, and the one used on very
   /// first launch before any selection has been persisted.
@@ -59,7 +60,7 @@ class BuiltInThemes {
     name: 'Dusk',
     type: ThemeType.colorsAndFont,
     primaryColor: const RgbaColor(red: 88, green: 86, blue: 168),
-    secondaryColor: const RgbaColor(red: 168, green: 138, blue: 214),
+    secondaryColor: const RgbaColor(red: 168, green: 138, blue: 200),
     surfaceColor: const RgbaColor(red: 245, green: 243, blue: 250),
     backgroundColor: const RgbaColor(red: 253, green: 252, blue: 255),
     textColor: const RgbaColor(red: 32, green: 28, blue: 44),
@@ -74,8 +75,8 @@ class BuiltInThemes {
     id: meadowId,
     name: 'Meadow',
     type: ThemeType.colorsAndFont,
-    primaryColor: const RgbaColor(red: 58, green: 106, blue: 62),
-    secondaryColor: const RgbaColor(red: 121, green: 134, blue: 41),
+    primaryColor: const RgbaColor(red: 58, green: 90, blue: 64),
+    secondaryColor: const RgbaColor(red: 82, green: 121, blue: 111),
     surfaceColor: const RgbaColor(red: 240, green: 248, blue: 236),
     backgroundColor: const RgbaColor(red: 247, green: 253, blue: 242),
     textColor: const RgbaColor(red: 27, green: 34, blue: 24),
@@ -94,10 +95,10 @@ class BuiltInThemes {
     name: 'Ocean',
     type: ThemeType.colorsAndFontWithHeaderImage,
     primaryColor: const RgbaColor(red: 23, green: 168, blue: 229),
-    secondaryColor: const RgbaColor(red: 38, green: 98, blue: 159),
+    secondaryColor: const RgbaColor(red: 51, green: 141, blue: 204),
     surfaceColor: const RgbaColor(red: 222, green: 242, blue: 253),
     backgroundColor: const RgbaColor(red: 235, green: 248, blue: 255),
-    textColor: const RgbaColor(red: 12, green: 30, blue: 45),
+    textColor: const RgbaColor(red: 27, green: 34, blue: 24),
     isDark: false,
     fontFamily: 'Quicksand',
     headerImagePath: oceanHeaderAsset,
@@ -121,7 +122,7 @@ class BuiltInThemes {
     name: 'Sunset',
     type: ThemeType.colorsAndFont,
     primaryColor: const RgbaColor(red: 199, green: 120, blue: 0),
-    secondaryColor: const RgbaColor(red: 180, green: 67, blue: 108),
+    secondaryColor:const RgbaColor(red: 196, green: 69, blue: 54),
     surfaceColor: const RgbaColor(red: 255, green: 240, blue: 234),
     backgroundColor: const RgbaColor(red: 255, green: 248, blue: 246),
     textColor: const RgbaColor(red: 43, green: 24, blue: 20),
@@ -165,7 +166,7 @@ class BuiltInThemes {
     name: 'Nightfall',
     type: ThemeType.colorsAndFontWithHeaderImage,
     primaryColor: const RgbaColor(red: 128, green: 148, blue: 220),
-    secondaryColor: const RgbaColor(red: 39, green: 51, blue: 137),
+    secondaryColor:const RgbaColor(red: 247, green: 174, blue: 248),
     surfaceColor: const RgbaColor(red: 32, green: 33, blue: 66),
     backgroundColor: const RgbaColor(red: 20, green: 21, blue: 48),
     textColor: const RgbaColor(red: 228, green: 229, blue: 245),
@@ -176,14 +177,34 @@ class BuiltInThemes {
     isBuiltIn: true,
   );
 
+  /// Midnight — deep charcoal-blue/teal palette, no header image (Type
+  /// 1: Colors + Font). Second dark-mode built-in, deliberately pulled
+  /// toward cool cyan-teal rather than [nightfall]'s indigo-violet so
+  /// the two dark themes read as distinct choices rather than
+  /// near-duplicates. Primary is a muted cyan-teal; secondary a deeper
+  /// slate-blue that stays complementary to it without competing.
+  static final AppThemeData midnight = AppThemeData(
+    id: midnightId,
+    name: 'Midnight',
+    type: ThemeType.colorsAndFont,
+    primaryColor: const RgbaColor(red: 77, green: 182, blue: 172),
+    secondaryColor: const RgbaColor(red: 58, green: 90, blue: 138),
+    surfaceColor: const RgbaColor(red: 26, green: 30, blue: 36),
+    backgroundColor: const RgbaColor(red: 15, green: 17, blue: 21),
+    textColor: const RgbaColor(red: 222, green: 233, blue: 232),
+    isDark: true,
+    fontFamily: 'Space Mono',
+    isBuiltIn: true,
+  );
+
   static final List<AppThemeData> all = [
     bloom,
     dusk,
     meadow,
     ocean,
     sunset,
-
     nightfall,
+    midnight,
   ];
 
   static AppThemeData get defaultTheme => bloom;

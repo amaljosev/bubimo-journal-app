@@ -3,6 +3,7 @@
 import 'package:bubimo/core/utils/date_utils.dart';
 import 'package:bubimo/core/utils/entry_grouping_utils.dart';
 import 'package:bubimo/features/home/presentation/widgets/diary_list_item.dart';
+import 'package:bubimo/features/shared/presentation/widgets/appbar_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -198,13 +199,24 @@ class _TimelineViewState extends State<_TimelineView>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final bgImagePath = Theme.of(
       context,
     ).extension<BackgroundImageTheme>()?.imagePath;
 
     return Scaffold(
-      
+      appBar: bgImagePath != null
+          ? null
+          : myAppbar(
+              context,
+              'Timeline',
+              IconPill(
+                onTap: _goToFavorites,
+                color: Colors.redAccent,
+                icon: Icons.favorite,
+                textColor: Colors.white,
+                label: '',
+              ),
+            ),
       body: BlocBuilder<DiaryListBloc, DiaryListState>(
         buildWhen: (previous, current) =>
             previous.status != current.status ||
@@ -228,17 +240,18 @@ class _TimelineViewState extends State<_TimelineView>
           return CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              BlocSelector<TimelineCubit, TimelineState, DateTime>(
-                selector: (state) => state.focusedDay,
-                builder: (context, focusedDay) {
-                  return _TimelineHeroAppBar(
-                    entries: entries,
-                    focusedDay: focusedDay,
-                    bgImagePath: bgImagePath,
-                    onFavoritesTap: _goToFavorites,
-                  );
-                },
-              ),
+              if (bgImagePath != null)
+                BlocSelector<TimelineCubit, TimelineState, DateTime>(
+                  selector: (state) => state.focusedDay,
+                  builder: (context, focusedDay) {
+                    return _TimelineHeroAppBar(
+                      entries: entries,
+                      focusedDay: focusedDay,
+                      bgImagePath: bgImagePath,
+                      onFavoritesTap: _goToFavorites,
+                    );
+                  },
+                ),
 
               BlocBuilder<TimelineCubit, TimelineState>(
                 builder: (context, timelineState) {
@@ -327,19 +340,19 @@ class _TimelineViewState extends State<_TimelineView>
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'timeline_new_entry_fab',
-        onPressed: _openCreateEntry,
-        backgroundColor: theme.colorScheme.primary,
-        foregroundColor: theme.colorScheme.onPrimary,
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        icon: const Icon(Icons.edit_outlined, size: 20),
-        label: const Text(
-          'New Entry',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
+      // floatingActionButton: FloatingActionButton.extended(
+      //   heroTag: 'timeline_new_entry_fab',
+      //   onPressed: _openCreateEntry,
+      //   backgroundColor: theme.colorScheme.primary,
+      //   foregroundColor: theme.colorScheme.onPrimary,
+      //   elevation: 4,
+      //   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      //   icon: const Icon(Icons.edit_outlined, size: 20),
+      //   label: const Text(
+      //     'New Entry',
+      //     style: TextStyle(fontWeight: FontWeight.w700),
+      //   ),
+      // ),
     );
   }
 }

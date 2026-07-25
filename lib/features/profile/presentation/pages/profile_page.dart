@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/navigation/premium_bottom_nav_bar.dart'
+import '../../../../core/navigation/notched_nav_bar.dart'
     show kNavBarHeight;
 import '../../../../core/widgets/error_screen.dart';
 import '../../../../core/widgets/loading_screen.dart';
@@ -42,7 +42,7 @@ class ProfileAnalyticsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-     appBar: myAppbar(context, 'Profile'),
+     appBar: myAppbar(context, 'Profile',null),
       body: BlocBuilder<ProfileCubit, ProfileState>(
         builder: (context, profileState) {
           return BlocBuilder<AnalyticsBloc, AnalyticsState>(

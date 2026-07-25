@@ -2,14 +2,12 @@ import 'package:bubimo/core/router/app_router.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-AppBar myAppbar(BuildContext context, String title) {
+AppBar myAppbar(BuildContext context, String title, Widget? favorite) {
   return AppBar(
     title: Text(title),
     centerTitle: true,
     elevation: 0,
-    actions: [
-      const _SettingsButton(),
-    ],
+    actions: [(favorite ?? const _SettingsButton())],
   );
 }
 

@@ -73,34 +73,41 @@ class AppColors {
   // variants and contrasting hues that read well as a supporting
   // color rather than competing with the primary.
 
+  // Each entry is index-matched to the primaryLight entry at the same
+  // position, so swatch i here is a deliberately-chosen companion for
+  // primaryLight[i] (analogous where the primary is already a "theme"
+  // hue like Dusk/Ocean/Meadow/Sunset/Bloom, complementary/split-
+  // complementary for the generic Material-ish hues that follow).
   static const List<RgbaColor> secondaryLight = [
-    RgbaColor(red: 168, green: 138, blue: 214), // Dusk lilac
-    RgbaColor(red: 38, green: 98, blue: 159), // Ocean deep azure
-    RgbaColor(red: 121, green: 134, blue: 41), // Meadow olive
-    RgbaColor(red: 180, green: 67, blue: 108), // Sunset rose
-    RgbaColor(red: 121, green: 115, blue: 177), // Bloom lavender
-    RgbaColor(red: 0, green: 121, blue: 107), // Teal accent
-    RgbaColor(red: 240, green: 98, blue: 146), // Pink accent
-    RgbaColor(red: 255, green: 167, blue: 38), // Amber accent
-    RgbaColor(red: 92, green: 107, blue: 192), // Indigo accent
-    RgbaColor(red: 141, green: 110, blue: 99), // Warm taupe
-    RgbaColor(red: 84, green: 110, blue: 122), // Slate blue-grey
-    RgbaColor(red: 106, green: 27, blue: 154), // Deep purple accent
+    RgbaColor(red: 168, green: 138, blue: 214), // Dusk lilac — w/ Dusk violet (analogous)
+    RgbaColor(red: 38, green: 98, blue: 159), // Ocean deep azure — w/ Ocean blue (analogous)
+    RgbaColor(red: 121, green: 134, blue: 41), // Meadow olive — w/ Meadow green (analogous)
+    RgbaColor(red: 180, green: 67, blue: 108), // Sunset rose — w/ Sunset amber (split-complementary)
+    RgbaColor(red: 121, green: 115, blue: 177), // Bloom lavender — w/ Bloom rose (complementary-ish)
+    RgbaColor(red: 230, green: 159, blue: 0), // Golden amber — w/ Classic blue (complementary)
+    RgbaColor(red: 194, green: 24, blue: 132), // Vivid magenta — w/ Purple (analogous)
+    RgbaColor(red: 0, green: 121, blue: 107), // Deep teal — w/ Red (complementary)
+    RgbaColor(red: 92, green: 107, blue: 192), // Indigo accent — w/ Teal (complementary-ish)
+    RgbaColor(red: 57, green: 73, blue: 171), // Deep indigo blue — w/ Orange (complementary)
+    RgbaColor(red: 183, green: 90, blue: 54), // Rust terracotta — w/ Green (complementary)
+    RgbaColor(red: 106, green: 27, blue: 154), // Deep purple accent — w/ Deep sky blue (analogous)
   ];
 
+  // Index-matched to primaryDark the same way secondaryLight is matched
+  // to primaryLight — see the comment above secondaryLight.
   static const List<RgbaColor> secondaryDark = [
-    RgbaColor(red: 179, green: 197, blue: 255), // Nightfall-adjacent periwinkle
-    RgbaColor(red: 129, green: 212, blue: 250), // Light azure
-    RgbaColor(red: 220, green: 231, blue: 117), // Light olive
-    RgbaColor(red: 240, green: 164, blue: 191), // Light rose
-    RgbaColor(red: 181, green: 177, blue: 219), // Light lavender
-    RgbaColor(red: 128, green: 203, blue: 196), // Light teal
-    RgbaColor(red: 248, green: 187, blue: 208), // Light pink
-    RgbaColor(red: 255, green: 213, blue: 128), // Light amber
-    RgbaColor(red: 159, green: 168, blue: 218), // Light indigo
-    RgbaColor(red: 188, green: 170, blue: 164), // Light taupe
-    RgbaColor(red: 176, green: 190, blue: 197), // Light slate
-    RgbaColor(red: 206, green: 147, blue: 216), // Light purple accent
+    RgbaColor(red: 179, green: 197, blue: 255), // Nightfall-adjacent periwinkle — w/ Nightfall periwinkle
+    RgbaColor(red: 129, green: 212, blue: 250), // Light azure — w/ Soft sky blue
+    RgbaColor(red: 220, green: 231, blue: 117), // Light olive — w/ Soft green
+    RgbaColor(red: 240, green: 164, blue: 191), // Light rose — w/ Soft amber (split-complementary)
+    RgbaColor(red: 181, green: 177, blue: 219), // Light lavender — w/ Soft rose
+    RgbaColor(red: 128, green: 203, blue: 196), // Light teal — w/ Soft purple (complementary)
+    RgbaColor(red: 162, green: 222, blue: 208), // Soft mint — w/ Soft red (complementary)
+    RgbaColor(red: 255, green: 213, blue: 128), // Light amber — w/ Soft teal (complementary)
+    RgbaColor(red: 159, green: 168, blue: 218), // Light indigo — w/ Soft orange (complementary)
+    RgbaColor(red: 233, green: 150, blue: 122), // Soft coral — w/ Soft lime green (complementary)
+    RgbaColor(red: 176, green: 190, blue: 197), // Light slate — w/ Periwinkle blue
+    RgbaColor(red: 216, green: 196, blue: 140), // Soft champagne gold — w/ Soft violet (complementary)
   ];
 
   // ── Surface ─────────────────────────────────────────────────────
