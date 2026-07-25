@@ -26,8 +26,22 @@ class BackupRestorePage extends StatelessWidget {
   }
 }
 
-class _BackupRestoreView extends StatelessWidget {
+class _BackupRestoreView extends StatefulWidget {
   const _BackupRestoreView();
+
+  @override
+  State<_BackupRestoreView> createState() => _BackupRestoreViewState();
+}
+
+class _BackupRestoreViewState extends State<_BackupRestoreView> {
+  /// True once a local `.bubimo` import has completed successfully
+  /// during this visit. Reported back to whoever pushed this route
+  /// (see `home_page.dart`'s `_openImportExport`) so Home knows to
+  /// refresh its entry list — same reasoning as
+  /// `CloudBackupPage._hasRestoredEntries`: `MainShell` keeps
+  /// `DiaryListBloc` alive for its whole lifetime, so nothing
+  /// re-fetches automatically just because this screen was popped.
+  bool _hasImportedEntries = false;
 
   Future<void> _handleExport(BuildContext context) async {
     context.read<BackupBloc>().add(const BackupExportRequested());
@@ -94,48 +108,54 @@ class _BackupRestoreView extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Import & Export')),
-      body: BlocConsumer<BackupBloc, BackupState>(
-        listenWhen: (previous, current) =>
-            current.status == BackupStatus.exportSuccess ||
-            current.status == BackupStatus.importSuccess ||
-            current.status == BackupStatus.pdfExportSuccess ||
-            current.status == BackupStatus.failure,
-        listener: (context, state) {
-          switch (state.status) {
-            case BackupStatus.exportSuccess:
-              _showResultDialog(
-                context,
-                title: 'Backup created',
-                message: state.exportResult!.savedToPublicDownloads
-                    ? 'Saved to your Downloads folder:\n'
-                        '${state.exportResult!.filePath}'
-                    : 'Saved inside the app\'s own storage (your device '
-                        'didn\'t make its Downloads folder available):\n'
-                        '${state.exportResult!.filePath}',
-              );
-            case BackupStatus.importSuccess:
-              final result = state.importResult!;
-              _showResultDialog(
-                context,
-                title: 'Import complete',
-                message: result.skippedCount == 0
-                    ? 'Added ${result.importedCount} ${result.importedCount == 1 ? 'entry' : 'entries'} to your diary.'
-                    : 'Added ${result.importedCount} ${result.importedCount == 1 ? 'entry' : 'entries'} to your diary. '
-                        '${result.skippedCount} ${result.skippedCount == 1 ? 'entry' : 'entries'} in the file '
-                        'couldn\'t be read and ${result.skippedCount == 1 ? 'was' : 'were'} skipped.',
-              );
-            case BackupStatus.pdfExportSuccess:
-              final result = state.pdfExportResult!;
-              _showResultDialog(
-                context,
-                title: 'PDF ready',
-                message:
-                    '${result.entryCount} ${result.entryCount == 1 ? 'entry' : 'entries'} saved as a readable PDF.\n\n'
-                    '${result.savedToPublicDownloads ? 'Saved to your Downloads folder:' : 'Saved inside the app\'s own storage (your device didn\'t make its Downloads folder available):'}\n'
-                    '${result.filePath}',
-              );
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) Navigator.of(context).pop(_hasImportedEntries);
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Import & Export')),
+        body: BlocConsumer<BackupBloc, BackupState>(
+          listenWhen: (previous, current) =>
+              current.status == BackupStatus.exportSuccess ||
+              current.status == BackupStatus.importSuccess ||
+              current.status == BackupStatus.pdfExportSuccess ||
+              current.status == BackupStatus.failure,
+          listener: (context, state) {
+            switch (state.status) {
+              case BackupStatus.exportSuccess:
+                _showResultDialog(
+                  context,
+                  title: 'Backup created',
+                  message: state.exportResult!.savedToPublicDownloads
+                      ? 'Saved to your Downloads folder:\n'
+                          '${state.exportResult!.filePath}'
+                      : 'Saved inside the app\'s own storage (your device '
+                          'didn\'t make its Downloads folder available):\n'
+                          '${state.exportResult!.filePath}',
+                );
+              case BackupStatus.importSuccess:
+                setState(() => _hasImportedEntries = true);
+                final result = state.importResult!;
+                _showResultDialog(
+                  context,
+                  title: 'Import complete',
+                  message: result.skippedCount == 0
+                      ? 'Added ${result.importedCount} ${result.importedCount == 1 ? 'entry' : 'entries'} to your diary.'
+                      : 'Added ${result.importedCount} ${result.importedCount == 1 ? 'entry' : 'entries'} to your diary. '
+                          '${result.skippedCount} ${result.skippedCount == 1 ? 'entry' : 'entries'} in the file '
+                          'couldn\'t be read and ${result.skippedCount == 1 ? 'was' : 'were'} skipped.',
+                );
+              case BackupStatus.pdfExportSuccess:
+                final result = state.pdfExportResult!;
+                _showResultDialog(
+                  context,
+                  title: 'PDF ready',
+                  message:
+                      '${result.entryCount} ${result.entryCount == 1 ? 'entry' : 'entries'} saved as a readable PDF.\n\n'
+                      '${result.savedToPublicDownloads ? 'Saved to your Downloads folder:' : 'Saved inside the app\'s own storage (your device didn\'t make its Downloads folder available):'}\n'
+                      '${result.filePath}',
+                );
             case BackupStatus.failure:
               _showResultDialog(
                 context,
@@ -205,6 +225,7 @@ class _BackupRestoreView extends StatelessWidget {
             ],
           );
         },
+        ),
       ),
     );
   }

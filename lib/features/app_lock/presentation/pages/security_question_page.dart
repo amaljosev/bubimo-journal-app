@@ -260,10 +260,9 @@ class _SecurityQuestionPageState extends State<SecurityQuestionPage> {
 
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: colorScheme.onPrimary),
-
+      hintStyle: TextStyle(color: colorScheme.onSurface),
       filled: true,
-      fillColor: colorScheme.primaryContainer,
+      fillColor: colorScheme.surfaceContainerHigh,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide.none,

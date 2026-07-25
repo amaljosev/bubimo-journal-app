@@ -32,6 +32,11 @@ import '../di/injection.dart';
 /// switches between built-in or custom themes (see
 /// `AppThemeCubit`/`theme_mapper.dart`) — no wiring needed here beyond
 /// mounting it under the themed `MaterialApp.router` in `main.dart`.
+///
+/// Back-button behavior: Diary (index 1) is the "home" tab. Pressing
+/// system back while on any other tab returns to Diary instead of
+/// exiting the app or popping the shell route; pressing back while
+/// already on Diary allows the normal pop (app exit / previous route).
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -40,7 +45,9 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
-  int _currentIndex = 1; // Diary is the default landing tab.
+  static const int _homeIndex = 1; // Diary is the default landing tab.
+
+  int _currentIndex = _homeIndex;
 
   // Created once and kept alive for the lifetime of the shell.
   late final DiaryListBloc _diaryListBloc;
@@ -98,9 +105,12 @@ class _MainShellState extends State<MainShell> {
 
   void _onTabTapped(int index) {
     if (index == _currentIndex) return;
-    
+    if (index == 1 && _currentIndex != 1) {
+      _diaryListBloc.add(LoadDiaryEntries());
+    }
+
     if (index == 3 && _currentIndex != 3) {
-     _analyticsBloc.add(LoadAnalytics());
+      _analyticsBloc.add(LoadAnalytics());
     }
     setState(() => _currentIndex = index);
   }
@@ -118,35 +128,56 @@ class _MainShellState extends State<MainShell> {
     }
   }
 
+  /// Called when a pop is attempted (system back button / gesture) while
+  /// [canPop] below was false, i.e. whenever we're not on the Diary tab.
+  /// Instead of letting the pop proceed (which would exit the app), we
+  /// redirect the user back to the Diary tab.
+  void _handlePopInvoked(bool didPop, Object? result) {
+    if (didPop) return; // Already handled elsewhere; nothing to do.
+
+    if (_currentIndex != _homeIndex) {
+      _onTabTapped(_homeIndex);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          BlocProvider.value(
-            value: _diaryListBloc,
-            child: const TimelinePage(),
-          ),
-          BlocProvider.value(value: _diaryListBloc, child: const HomePage()),
-          BlocProvider.value(value: _themeListBloc, child: const ThemeScreen()),
-          MultiBlocProvider(
-            providers: [
-              BlocProvider.value(value: _profileCubit),
-              BlocProvider.value(value: _analyticsBloc),
-            ],
-            child: const ProfileAnalyticsScreen(),
-          ),
-        ],
-      ),
-      extendBody: true,
-      bottomNavigationBar: NotchedNavBar(
-        leftItems: _leftTabs,
-        rightItems: _rightTabs,
-        currentIndex: _currentIndex,
-        onTap: _onTabTapped,
-        onFabTap: () => _openCreateEntry(context),
-        fabIcon: Icons.add, // keep the "+" icon
+    return PopScope(
+      // Only allow the system pop (which exits the app / goes to the
+      // previous route) when we're already on the Diary "home" tab.
+      canPop: _currentIndex == _homeIndex,
+      onPopInvokedWithResult: _handlePopInvoked,
+      child: Scaffold(
+        body: IndexedStack(
+          index: _currentIndex,
+          children: [
+            BlocProvider.value(
+              value: _diaryListBloc,
+              child: const TimelinePage(),
+            ),
+            BlocProvider.value(value: _diaryListBloc, child: const HomePage()),
+            BlocProvider.value(
+              value: _themeListBloc,
+              child: const ThemeScreen(),
+            ),
+            MultiBlocProvider(
+              providers: [
+                BlocProvider.value(value: _profileCubit),
+                BlocProvider.value(value: _analyticsBloc),
+              ],
+              child: const ProfileAnalyticsScreen(),
+            ),
+          ],
+        ),
+        extendBody: true,
+        bottomNavigationBar: NotchedNavBar(
+          leftItems: _leftTabs,
+          rightItems: _rightTabs,
+          currentIndex: _currentIndex,
+          onTap: _onTabTapped,
+          onFabTap: () => _openCreateEntry(context),
+          fabIcon: Icons.add, // keep the "+" icon
+        ),
       ),
     );
   }

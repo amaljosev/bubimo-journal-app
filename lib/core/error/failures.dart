@@ -118,3 +118,7 @@ final class CloudBackupFailure extends Failure {
     super.message = 'Cloud backup failed.',
   ]);
 }
+
+class ContactFailure extends Failure {
+  const ContactFailure(super.message);
+}

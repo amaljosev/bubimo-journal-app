@@ -1,6 +1,8 @@
 // lib/features/settings/presentation/pages/settings_page.dart
 
 import 'package:bubimo/core/router/app_router.dart';
+import 'package:bubimo/features/contact_us/presentation/widgets/contact_us_sheet.dart';
+import 'package:bubimo/features/settings/presentation/widgets/about_app_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -53,7 +55,7 @@ class SettingsPage extends StatelessWidget {
                 SettingsListItem(
                   icon: Icons.backup_outlined,
                   label: 'Backup & Restore',
-                  onTap: () => context.push(AppRoutes.cloudBackup)
+                  onTap: () => context.push(AppRoutes.cloudBackup),
                 ),
                 SettingsListItem(
                   icon: Icons.ios_share_rounded,
@@ -89,10 +91,17 @@ class SettingsPage extends StatelessWidget {
                 SettingsListItem(
                   icon: Icons.info_outline_rounded,
                   label: 'About This App',
+                  onTap: () => showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => const AboutAppSheet(),
+                  ),
                 ),
                 SettingsListItem(
                   icon: Icons.mail_outline_rounded,
                   label: 'Contact Us',
+                  onTap: () => showContactUsSheet(context),
                 ),
               ],
             ),
@@ -113,6 +122,15 @@ class SettingsPage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  void showContactUsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const ContactUsSheet(),
     );
   }
 }

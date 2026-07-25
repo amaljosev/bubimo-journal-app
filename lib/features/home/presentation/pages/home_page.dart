@@ -76,150 +76,124 @@ class _HomeViewState extends State<_HomeView> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      extendBodyBehindAppBar:headerImagePath == null ,
+      extendBodyBehindAppBar: headerImagePath == null,
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // Always-pinned top bar (settings action), replacing the old
-          // Scaffold.appBar. It needs to live inside the CustomScrollView
-          // as its own pinned SliverAppBar — a Scaffold.appBar floats in
-          // its own layer above the whole body, so nothing pinned inside
-          // the CustomScrollView can ever dock "below" it. Putting it in
-          // the sliver list is what lets the favorites toggle below pin
-          // directly underneath it instead of sliding under it.
-         if(headerImagePath == null) SliverAppBar(
-            pinned: true,
-            backgroundColor: colorScheme.surface,
-            automaticallyImplyLeading: false,
-            elevation: 0,
-            actions: [
-              IconButton(
-                onPressed: () => context.push(AppRoutes.settings),
-                icon: Icon(Icons.settings),
-              ),
-            ],
-          ),
-        if(headerImagePath != null)  SliverAppBar(
-            expandedHeight: _headerExpandedHeight,
-            centerTitle: true,
-            // No back button on a tab root, and no theme-agnostic
-            // elevation shadow riding on top of the header image.
-            automaticallyImplyLeading: false,
-            elevation: 0,
-             actions: [
-              IconButton(
-                onPressed: () => context.push(AppRoutes.settings),
-                icon: Icon(Icons.settings),
-              ),
-            ],
-            // Only worth enabling the overscroll stretch effect when
-            // there's actually a header image to stretch — with the
-            // plain kToolbarHeight bar (no image) there's nothing for
-            // `stretch` to visually affect, so it's skipped to avoid
-            // spending the extra overscroll-physics work for no effect.
-            stretch: true,
-            // How far past the top the user must pull before
-            // `onStretchTrigger` fires. Note this only gates the
-            // *callback* — the zoomBackground visual itself starts
-            // scaling immediately on any overscroll, growing
-            // proportionally the further past the top edge the user
-            // drags, so this value doesn't need to be large to see
-            // the zoom kick in.
-            
-            stretchTriggerOffset: 50,
-            onStretchTrigger: () async {},
-            flexibleSpace: FlexibleSpaceBar(
-                    stretchModes: const [
-                      StretchMode.zoomBackground,
-                      StretchMode.fadeTitle,
-                    ],
-                    background: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        BackgroundHeaderImage(path: headerImagePath),
+          if (headerImagePath != null)
+            SliverAppBar(
+              expandedHeight: _headerExpandedHeight,
+              centerTitle: true,
+              // No back button on a tab root, and no theme-agnostic
+              // elevation shadow riding on top of the header image.
+              automaticallyImplyLeading: false,
+              elevation: 0,
 
-                        // Frosted transition band: blurs only the bottom portion
-                        // of the image itself (not whatever sits behind the
-                        // sliver boundary), with the blur intensity ramping in
-                        // via ShaderMask rather than switching on at a hard edge.
-                        // Because this sits inside the image's own Stack, it
-                        // always has real image content beneath it regardless of
-                        // scroll offset — unlike a separate BackdropFilter widget
-                        // positioned below the sliver, which only has whatever
-                        // happens to be rendered there at that scroll position.
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          height: _headerExpandedHeight * 0.5,
-                          child: ShaderMask(
-                            shaderCallback: (rect) => const LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              // Alpha ramp controls how much blur "shows through"
-                              // at each height — 0 at top (no blur) to full blur
-                              // at the very bottom, so the transition itself
-                              // feels gradual instead of a visible blur/no-blur
-                              // line.
-                              colors: [Colors.transparent, Colors.black],
-                              stops: [0.0, 0.85],
-                            ).createShader(rect),
-                            blendMode: BlendMode.dstIn,
-                            child: ClipRect(
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(
-                                  sigmaX: 24,
-                                  sigmaY: 24,
-                                ),
-                                child: const SizedBox.expand(),
-                              ),
-                            ),
+              // Only worth enabling the overscroll stretch effect when
+              // there's actually a header image to stretch — with the
+              // plain kToolbarHeight bar (no image) there's nothing for
+              // `stretch` to visually affect, so it's skipped to avoid
+              // spending the extra overscroll-physics work for no effect.
+              stretch: true,
+
+              // How far past the top the user must pull before
+              // `onStretchTrigger` fires. Note this only gates the
+              // *callback* — the zoomBackground visual itself starts
+              // scaling immediately on any overscroll, growing
+              // proportionally the further past the top edge the user
+              // drags, so this value doesn't need to be large to see
+              // the zoom kick in.
+              stretchTriggerOffset: 50,
+              onStretchTrigger: () async {},
+              flexibleSpace: FlexibleSpaceBar(
+                stretchModes: const [
+                  StretchMode.zoomBackground,
+                  StretchMode.fadeTitle,
+                ],
+                background: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    BackgroundHeaderImage(path: headerImagePath),
+
+                    // Frosted transition band: blurs only the bottom portion
+                    // of the image itself (not whatever sits behind the
+                    // sliver boundary), with the blur intensity ramping in
+                    // via ShaderMask rather than switching on at a hard edge.
+                    // Because this sits inside the image's own Stack, it
+                    // always has real image content beneath it regardless of
+                    // scroll offset — unlike a separate BackdropFilter widget
+                    // positioned below the sliver, which only has whatever
+                    // happens to be rendered there at that scroll position.
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: _headerExpandedHeight * 0.5,
+                      child: ShaderMask(
+                        shaderCallback: (rect) => const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          // Alpha ramp controls how much blur "shows through"
+                          // at each height — 0 at top (no blur) to full blur
+                          // at the very bottom, so the transition itself
+                          // feels gradual instead of a visible blur/no-blur
+                          // line.
+                          colors: [Colors.transparent, Colors.black],
+                          stops: [0.0, 0.85],
+                        ).createShader(rect),
+                        blendMode: BlendMode.dstIn,
+                        child: ClipRect(
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                            child: const SizedBox.expand(),
                           ),
                         ),
-
-                        // Readability scrim up top, unchanged.
-                        const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment(0, -0.2),
-                              colors: [
-                                Color.fromRGBO(0, 0, 0, 0.35),
-                                Colors.transparent,
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // Color fade to the exact body surface color — this is
-                        // what actually dissolves the image into the page
-                        // background by the time the sliver boundary is reached.
-                        // Placed after the blur layer so it composites on top,
-                        // softening the blurred pixels into flat color at the
-                        // very bottom rather than leaving softened-but-still-
-                        // visible image detail right at the seam.
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Container(
-                            height: _headerExpandedHeight * 0.55,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  colorScheme.surface.withValues(alpha: 0),
-                                  colorScheme.surface.withValues(alpha: 0.55),
-                                  colorScheme.surface,
-                                ],
-                                stops: const [0.0, 0.7, 1.0],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-          ),
+
+                    // Readability scrim up top, unchanged.
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment(0, -0.2),
+                          colors: [
+                            Color.fromRGBO(0, 0, 0, 0.35),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Color fade to the exact body surface color — this is
+                    // what actually dissolves the image into the page
+                    // background by the time the sliver boundary is reached.
+                    // Placed after the blur layer so it composites on top,
+                    // softening the blurred pixels into flat color at the
+                    // very bottom rather than leaving softened-but-still-
+                    // visible image detail right at the seam.
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        height: _headerExpandedHeight * 0.55,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              colorScheme.surface.withValues(alpha: 0),
+                              colorScheme.surface.withValues(alpha: 0.55),
+                              colorScheme.surface,
+                            ],
+                            stops: const [0.0, 0.7, 1.0],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           // Pinned favorites toggle bar. Using SliverPersistentHeader
           // (pinned: true) instead of a SliverToBoxAdapter so this
@@ -230,7 +204,7 @@ class _HomeViewState extends State<_HomeView> {
           SliverPersistentHeader(
             pinned: true,
             delegate: _PinnedFavoritesHeaderDelegate(
-              backgroundColor: colorScheme.surface,
+              backgroundColor: Colors.transparent,
               child: BlocBuilder<DiaryListBloc, DiaryListState>(
                 builder: (context, state) {
                   return Center(

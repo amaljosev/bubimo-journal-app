@@ -177,13 +177,14 @@ class BuiltInThemes {
   );
 
   static final List<AppThemeData> all = [
+    bloom,
     dusk,
     meadow,
     ocean,
     sunset,
-    bloom,
+
     nightfall,
   ];
 
-  static AppThemeData get defaultTheme => dusk;
+  static AppThemeData get defaultTheme => bloom;
 }

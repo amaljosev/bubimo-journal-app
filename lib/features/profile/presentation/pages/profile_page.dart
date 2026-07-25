@@ -1,9 +1,13 @@
 // lib/features/profile/presentation/pages/profile_analytics_screen.dart
 
+import 'package:bubimo/core/router/app_router.dart';
+import 'package:bubimo/features/shared/presentation/widgets/appbar_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
-import '../../../../core/navigation/premium_bottom_nav_bar.dart' show kNavBarHeight;
+import '../../../../core/navigation/premium_bottom_nav_bar.dart'
+    show kNavBarHeight;
 import '../../../../core/widgets/error_screen.dart';
 import '../../../../core/widgets/loading_screen.dart';
 import '../bloc/analytics_bloc.dart';
@@ -18,7 +22,6 @@ import '../cubit/profile_cubit.dart';
 import '../cubit/profile_state.dart';
 import '../widgets/edit_profile_sheet.dart';
 import '../widgets/profile_header.dart';
-
 
 class ProfileAnalyticsScreen extends StatelessWidget {
   const ProfileAnalyticsScreen({super.key});
@@ -39,10 +42,7 @@ class ProfileAnalyticsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        title: const Text('Profile & Analytics'),
-      ),
+     appBar: myAppbar(context, 'Profile'),
       body: BlocBuilder<ProfileCubit, ProfileState>(
         builder: (context, profileState) {
           return BlocBuilder<AnalyticsBloc, AnalyticsState>(
@@ -63,11 +63,12 @@ class ProfileAnalyticsScreen extends StatelessWidget {
     // The profile card and the analytics cards load somewhat
     // independently (two separate blocs); only block the whole screen
     // on a spinner while BOTH are still on their very first load.
-    final profileStillLoading = profileState.status == ProfileStatus.initial ||
+    final profileStillLoading =
+        profileState.status == ProfileStatus.initial ||
         profileState.status == ProfileStatus.loading;
     final analyticsStillLoading =
         analyticsState.status == AnalyticsStatus.initial ||
-            analyticsState.status == AnalyticsStatus.loading;
+        analyticsState.status == AnalyticsStatus.loading;
 
     if (profileStillLoading && analyticsStillLoading) {
       return const LoadingScreen();
@@ -76,8 +77,7 @@ class ProfileAnalyticsScreen extends StatelessWidget {
     if (analyticsState.status == AnalyticsStatus.failure) {
       return ErrorScreen(
         message: analyticsState.errorMessage ?? 'Something went wrong.',
-        onRetry: () =>
-            context.read<AnalyticsBloc>().add(const LoadAnalytics()),
+        onRetry: () => context.read<AnalyticsBloc>().add(const LoadAnalytics()),
       );
     }
 
@@ -125,7 +125,7 @@ class ProfileAnalyticsScreen extends StatelessWidget {
             StatsSummaryCard(stats: analyticsState.entryStats),
             const SizedBox(height: 12),
             HeatmapWidget(heatmapData: analyticsState.heatmapData),
-            
+
             const SizedBox(height: 12),
             MoodCountChart(moodCounts: analyticsState.moodCounts),
             const SizedBox(height: 12),

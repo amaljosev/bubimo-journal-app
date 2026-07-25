@@ -1,5 +1,6 @@
 // lib/features/theme/presentation/pages/theme_screen.dart
 
+import 'package:bubimo/features/shared/presentation/widgets/appbar_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -32,11 +33,32 @@ class ThemeScreen extends StatefulWidget {
 
 class _ThemeScreenState extends State<ThemeScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabController =
-      TabController(length: 2, vsync: this);
+  late final TabController _tabController = TabController(
+    length: 2,
+    vsync: this,
+  );
+
+  // Guards against the "Add Custom Theme" button / a custom theme's
+  // edit tap firing twice in quick succession (double-tap, or a tap
+  // landing during a BlocConsumer rebuild) and pushing
+  // AppRoutes.customThemeScreen onto the stack twice. Both entry
+  // points share one flag since they lead to the same destination
+  // route and are mutually exclusive from the user's perspective —
+  // you're never trying to both add and edit in the same instant.
+  bool _isNavigatingToCustomThemeScreen = false;
 
   Future<void> _openCreateCustomTheme(BuildContext context) async {
+    if (_isNavigatingToCustomThemeScreen) return;
+    _isNavigatingToCustomThemeScreen = true;
+
     final result = await context.push<bool>(AppRoutes.customThemeScreen);
+
+    if (context.mounted) {
+      setState(() => _isNavigatingToCustomThemeScreen = false);
+    } else {
+      _isNavigatingToCustomThemeScreen = false;
+    }
+
     if (result == true && context.mounted) {
       context.read<ThemeListBloc>().add(const ThemeListLoaded());
     }
@@ -46,10 +68,20 @@ class _ThemeScreenState extends State<ThemeScreen>
     BuildContext context,
     AppThemeData theme,
   ) async {
+    if (_isNavigatingToCustomThemeScreen) return;
+    _isNavigatingToCustomThemeScreen = true;
+
     final result = await context.push<bool>(
       AppRoutes.customThemeScreen,
       extra: theme,
     );
+
+    if (context.mounted) {
+      setState(() => _isNavigatingToCustomThemeScreen = false);
+    } else {
+      _isNavigatingToCustomThemeScreen = false;
+    }
+
     if (result == true && context.mounted) {
       context.read<ThemeListBloc>().add(const ThemeListLoaded());
     }
@@ -70,7 +102,9 @@ class _ThemeScreenState extends State<ThemeScreen>
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: Text(
               'Delete',
-              style: TextStyle(color: Theme.of(dialogContext).colorScheme.error),
+              style: TextStyle(
+                color: Theme.of(dialogContext).colorScheme.error,
+              ),
             ),
           ),
         ],
@@ -78,9 +112,7 @@ class _ThemeScreenState extends State<ThemeScreen>
     );
 
     if (confirmed == true && context.mounted) {
-      context
-          .read<ThemeListBloc>()
-          .add(ThemeListCustomThemeDeleted(theme.id));
+      context.read<ThemeListBloc>().add(ThemeListCustomThemeDeleted(theme.id));
     }
   }
 
@@ -97,28 +129,23 @@ class _ThemeScreenState extends State<ThemeScreen>
           current.errorMessage != null &&
           current.errorMessage != previous.errorMessage,
       listener: (context, state) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(state.errorMessage!)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(state.errorMessage!)));
       },
       builder: (context, state) {
         final activeTheme = getIt<AppThemeCubit>().currentTheme;
 
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Themes'),
-            centerTitle: true,
-            elevation: 0,
-          ),
+          appBar: myAppbar(context, 'Themes'),
           body: Column(
             children: [
-              if (activeTheme != null)
-                CurrentThemeHeader(theme: activeTheme),
+              if (activeTheme != null) CurrentThemeHeader(theme: activeTheme),
               ResetToDefaultButton(
                 isEnabled: !state.isActionInProgress,
-                onPressed: () => context
-                    .read<ThemeListBloc>()
-                    .add(const ThemeListResetToDefaultRequested()),
+                onPressed: () => context.read<ThemeListBloc>().add(
+                  const ThemeListResetToDefaultRequested(),
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
@@ -131,6 +158,7 @@ class _ThemeScreenState extends State<ThemeScreen>
                     _BuiltInThemesTab(state: state),
                     _CustomThemesTab(
                       state: state,
+                      isNavigating: _isNavigatingToCustomThemeScreen,
                       onEdit: (theme) => _openEditCustomTheme(context, theme),
                       onDelete: (theme) => _confirmDelete(context, theme),
                       onAdd: () => _openCreateCustomTheme(context),
@@ -221,9 +249,10 @@ class _ModernTabBarState extends State<_ModernTabBar> {
                 AnimatedBuilder(
                   animation: widget.controller.animation!,
                   builder: (context, child) {
-                    final position = (widget.controller.animation?.value ??
-                            widget.controller.index.toDouble())
-                        .clamp(0.0, _labels.length - 1.0);
+                    final position =
+                        (widget.controller.animation?.value ??
+                                widget.controller.index.toDouble())
+                            .clamp(0.0, _labels.length - 1.0);
                     return Positioned(
                       left: position * segmentWidth,
                       width: segmentWidth,
@@ -337,9 +366,9 @@ class _BuiltInThemesTab extends StatelessWidget {
           theme: theme,
           isActive: theme.id == state.activeThemeId,
           isEnabled: !state.isActionInProgress,
-          onTap: () => context
-              .read<ThemeListBloc>()
-              .add(ThemeListThemeApplied(theme.id)),
+          onTap: () => context.read<ThemeListBloc>().add(
+            ThemeListThemeApplied(theme.id),
+          ),
         );
       },
     );
@@ -348,12 +377,14 @@ class _BuiltInThemesTab extends StatelessWidget {
 
 class _CustomThemesTab extends StatelessWidget {
   final ThemeListState state;
+  final bool isNavigating;
   final ValueChanged<AppThemeData> onEdit;
   final ValueChanged<AppThemeData> onDelete;
   final VoidCallback onAdd;
 
   const _CustomThemesTab({
     required this.state,
+    required this.isNavigating,
     required this.onEdit,
     required this.onDelete,
     required this.onAdd,
@@ -365,24 +396,32 @@ class _CustomThemesTab extends StatelessWidget {
       return const Center(child: CircularProgressIndicator());
     }
 
+    // Disabling the button/tiles while a push is in flight (rather than
+    // only relying on the debounce flag inside the handler) gives the
+    // user visible feedback too — the button greys out immediately
+    // instead of silently swallowing the extra taps.
+    final canNavigate = !isNavigating;
+
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: FilledButton.icon(
-            onPressed: state.canAddCustomTheme ? onAdd : null,
+            onPressed: (state.canAddCustomTheme && canNavigate) ? onAdd : null,
             icon: const Icon(Icons.add),
             label: Text(
               state.canAddCustomTheme
                   ? 'Add Custom Theme'
                   : 'Custom theme limit reached (3/3)',
             ),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(46),
+            ),
           ),
         ),
         Expanded(
           child: state.customThemes.isEmpty
-              ? _EmptyCustomThemes(onAdd: onAdd)
+              ? _EmptyCustomThemes(onAdd: canNavigate ? onAdd : () {})
               : ListView.builder(
                   padding: EdgeInsets.fromLTRB(
                     0,
@@ -397,10 +436,10 @@ class _CustomThemesTab extends StatelessWidget {
                       theme: theme,
                       isActive: theme.id == state.activeThemeId,
                       isEnabled: !state.isActionInProgress,
-                      onApply: () => context
-                          .read<ThemeListBloc>()
-                          .add(ThemeListThemeApplied(theme.id)),
-                      onEdit: () => onEdit(theme),
+                      onApply: () => context.read<ThemeListBloc>().add(
+                        ThemeListThemeApplied(theme.id),
+                      ),
+                      onEdit: canNavigate ? () => onEdit(theme) : () {},
                       onDelete: () => onDelete(theme),
                     );
                   },

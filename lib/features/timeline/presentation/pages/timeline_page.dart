@@ -133,8 +133,19 @@ class _TimelineViewState extends State<_TimelineView>
     }
   }
 
+  bool _isNavigatingToFavorites = false;
+
   void _goToFavorites() {
-    context.push(AppRoutes.favorites);
+    if (_isNavigatingToFavorites) return;
+    _isNavigatingToFavorites = true;
+
+    context.push(AppRoutes.favorites).then((_) {
+      if (mounted) {
+        setState(() => _isNavigatingToFavorites = false);
+      } else {
+        _isNavigatingToFavorites = false;
+      }
+    });
   }
 
   Future<void> _openCreateEntry() async {
@@ -193,6 +204,7 @@ class _TimelineViewState extends State<_TimelineView>
     ).extension<BackgroundImageTheme>()?.imagePath;
 
     return Scaffold(
+      
       body: BlocBuilder<DiaryListBloc, DiaryListState>(
         buildWhen: (previous, current) =>
             previous.status != current.status ||

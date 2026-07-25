@@ -36,6 +36,12 @@ class CloudBackupState extends Equatable {
   final CloudBackupStatus status;
   final bool isSignedIn;
 
+  /// Email of the linked Google account, once known — set after an
+  /// interactive sign-in, or after [CloudBackupBloc] restores a
+  /// previously-saved session on page open. Used to show the user
+  /// which account is linked without prompting them again.
+  final String? signedInEmail;
+
   /// The current cloud backup, if one exists — refreshed after sign-in
   /// and after every successful backup/restore/delete.
   final CloudBackupMetadata? currentBackup;
@@ -50,6 +56,7 @@ class CloudBackupState extends Equatable {
   const CloudBackupState({
     this.status = CloudBackupStatus.idle,
     this.isSignedIn = false,
+    this.signedInEmail,
     this.currentBackup,
     this.restoredCount,
     this.message,
@@ -61,6 +68,7 @@ class CloudBackupState extends Equatable {
   CloudBackupState copyWith({
     CloudBackupStatus? status,
     bool? isSignedIn,
+    String? signedInEmail,
     CloudBackupMetadata? currentBackup,
     bool clearCurrentBackup = false,
     int? restoredCount,
@@ -70,6 +78,7 @@ class CloudBackupState extends Equatable {
     return CloudBackupState(
       status: status ?? this.status,
       isSignedIn: isSignedIn ?? this.isSignedIn,
+      signedInEmail: signedInEmail ?? this.signedInEmail,
       currentBackup: clearCurrentBackup
           ? null
           : (currentBackup ?? this.currentBackup),
@@ -83,6 +92,7 @@ class CloudBackupState extends Equatable {
   List<Object?> get props => [
         status,
         isSignedIn,
+        signedInEmail,
         currentBackup,
         restoredCount,
         message,

@@ -7,6 +7,7 @@ import '../../../../core/error/failures.dart';
 import '../../../backup/data/datasources/backup_local_data_source.dart';
 import '../../domain/entities/cloud_backup_metadata.dart';
 import '../../domain/repositories/cloud_backup_repository.dart';
+import '../datasources/cloud_backup_local_datasource.dart';
 import '../datasources/google_auth_datasource.dart';
 import '../datasources/google_drive_datasource.dart';
 import '../models/cloud_backup_manifest_model.dart';
@@ -36,20 +37,26 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   final GoogleAuthDataSource authDataSource;
   final GoogleDriveDataSource driveDataSource;
   final BackupLocalDataSource backupLocalDataSource;
+  final CloudBackupLocalDataSource localDataSource;
 
   const CloudBackupRepositoryImpl({
     required this.authDataSource,
     required this.driveDataSource,
     required this.backupLocalDataSource,
+    required this.localDataSource,
   });
 
   // ── Auth ──────────────────────────────────────────────────────────
 
   @override
-  Future<Either<Failure, void>> signIn() async {
+  Future<Either<Failure, String>> signIn() async {
     try {
       await authDataSource.signIn();
-      return const Right(null);
+      final email = authDataSource.currentAccountEmail;
+      if (email != null) {
+        await localDataSource.saveEmail(email);
+      }
+      return Right(email ?? '');
     } on AuthCancelledException catch (e) {
       return Left(AuthCancelledFailure(e.message));
     } on AuthException catch (e) {
@@ -60,15 +67,32 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   }
 
   @override
-  Future<Either<Failure, bool>> signInSilently() async {
+  Future<Either<Failure, String?>> restoreSession() async {
+    final savedEmail = await localDataSource.getSavedEmail();
+    if (savedEmail == null) {
+      // Nothing was ever linked (or the user explicitly signed out) —
+      // deliberately never touches the native Google sign-in APIs in
+      // this case, which is what stops the app from attempting a
+      // sign-in on every single visit to the Cloud Backup screen.
+      return const Right(null);
+    }
+
     try {
       final wasSignedIn = await authDataSource.signInSilently();
-      return Right(wasSignedIn);
-    } catch (e) {
-      // Silent sign-in failing just means "not signed in" — never
-      // surfaced as an error to the user, matching the datasource's
-      // own swallow-and-return-false behavior.
-      return const Right(false);
+      if (!wasSignedIn) {
+        // The saved marker is stale — Google no longer recognizes an
+        // active session (e.g. access was revoked elsewhere). Clear it
+        // so future visits go straight to the sign-in button instead
+        // of repeating this failed check.
+        await localDataSource.clear();
+        return const Right(null);
+      }
+      return Right(savedEmail);
+    } catch (_) {
+      // Couldn't confirm right now (e.g. offline) — don't erase the
+      // saved account over what may just be a transient/network
+      // problem; treat the session as still valid for this visit.
+      return Right(savedEmail);
     }
   }
 
@@ -76,6 +100,7 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   Future<Either<Failure, void>> signOut() async {
     try {
       await authDataSource.signOut();
+      await localDataSource.clear();
       return const Right(null);
     } on AuthException catch (e) {
       return Left(AuthFailure(e.message));

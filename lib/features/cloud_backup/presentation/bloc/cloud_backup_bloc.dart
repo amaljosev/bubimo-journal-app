@@ -22,7 +22,7 @@ class CloudBackupBloc extends Bloc<CloudBackupEvent, CloudBackupState> {
   CloudBackupBloc({required this.repository})
       : super(const CloudBackupState()) {
     on<CloudBackupSignInRequested>(_onSignIn);
-    on<CloudBackupSilentSignInRequested>(_onSilentSignIn);
+    on<CloudBackupSilentSignInRequested>(_onRestoreSession);
     on<CloudBackupSignOutRequested>(_onSignOut);
     on<CloudBackupNowRequested>(_onBackupNow);
     on<CloudBackupStatusRequested>(_onStatusRequested);
@@ -42,8 +42,11 @@ class CloudBackupBloc extends Bloc<CloudBackupEvent, CloudBackupState> {
 
     result.fold(
       (failure) {
-        // The user simply dismissed the account picker — return to
-        // idle silently rather than showing this as an error.
+        // The user simply dismissed the account picker (or the
+        // consent sheet, or the request quietly timed out after being
+        // dismissed abnormally — see `GoogleAuthDataSource.signIn`) —
+        // return to idle silently rather than showing this as an
+        // error.
         if (failure is AuthCancelledFailure) {
           emit(
             state.copyWith(status: CloudBackupStatus.idle, message: null),
@@ -58,25 +61,40 @@ class CloudBackupBloc extends Bloc<CloudBackupEvent, CloudBackupState> {
           ),
         );
       },
-      (_) {
+      (email) {
         emit(
-          state.copyWith(status: CloudBackupStatus.success, isSignedIn: true),
+          state.copyWith(
+            status: CloudBackupStatus.success,
+            isSignedIn: true,
+            signedInEmail: email.isEmpty ? null : email,
+          ),
         );
         add(const CloudBackupStatusRequested());
       },
     );
   }
 
-  Future<void> _onSilentSignIn(
+  /// Fired once when the Cloud Backup screen opens. Checks for a
+  /// previously-saved account before doing anything else — if none is
+  /// saved (first visit, or the user explicitly signed out), this
+  /// resolves immediately without any native Google call, and the
+  /// screen simply shows the "Sign in with Google" button. If one IS
+  /// saved, this confirms the session is still valid and, if so, shows
+  /// the linked account and kicks off a status refresh — it never
+  /// launches the interactive sign-in flow itself.
+  Future<void> _onRestoreSession(
     CloudBackupSilentSignInRequested event,
     Emitter<CloudBackupState> emit,
   ) async {
-    final result = await repository.signInSilently();
+    final result = await repository.restoreSession();
     result.fold(
       (_) => emit(state.copyWith(isSignedIn: false)),
-      (wasSignedIn) {
-        emit(state.copyWith(isSignedIn: wasSignedIn));
-        if (wasSignedIn) add(const CloudBackupStatusRequested());
+      (email) {
+        final signedIn = email != null;
+        emit(
+          state.copyWith(isSignedIn: signedIn, signedInEmail: email),
+        );
+        if (signedIn) add(const CloudBackupStatusRequested());
       },
     );
   }

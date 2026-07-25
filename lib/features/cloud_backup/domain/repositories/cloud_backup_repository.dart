@@ -42,13 +42,25 @@ typedef CloudBackupProgressCallback = void Function(CloudBackupPhase phase);
 /// `StickerRepository` (several related operations, no meaningful
 /// per-operation business logic beyond the repository call itself).
 abstract class CloudBackupRepository {
-  /// Interactive Google sign-in (shows the account picker).
-  Future<Either<Failure, void>> signIn();
+  /// Interactive Google sign-in (shows the account picker). Returns
+  /// the signed-in account's email on success, so the caller can show
+  /// and persist it.
+  Future<Either<Failure, String>> signIn();
 
-  /// Silent (non-interactive) sign-in attempt — used on app start to
-  /// restore a previous session without prompting. Returns whether a
-  /// signed-in account was found.
-  Future<Either<Failure, bool>> signInSilently();
+  /// Checks whether an account is already linked WITHOUT necessarily
+  /// prompting the user, and without calling into Google at all if
+  /// nothing has ever been linked (or the user explicitly signed out).
+  ///
+  /// - No account saved locally → returns `Right(null)` immediately;
+  ///   never touches the native Google sign-in APIs.
+  /// - An account is saved locally → confirms the session is still
+  ///   valid with a single silent (non-interactive) native check, and
+  ///   returns the account's email if so.
+  ///
+  /// This is what [CloudBackupBloc] calls when the Cloud Backup screen
+  /// opens, replacing the previous behavior of unconditionally
+  /// attempting a native sign-in on every visit.
+  Future<Either<Failure, String?>> restoreSession();
 
   Future<Either<Failure, void>> signOut();
 

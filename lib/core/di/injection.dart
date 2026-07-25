@@ -1,6 +1,9 @@
 // lib/core/di/injection.dart
 
 import 'package:bubimo/features/backup/presentation/bloc/backup_bloc.dart';
+import 'package:bubimo/features/contact_us/data/repositories/contact_repository_impl.dart';
+import 'package:bubimo/features/contact_us/domain/repositories/contact_repository.dart';
+import 'package:bubimo/features/contact_us/domain/usecases/send_support_email.dart';
 import 'package:bubimo/features/home/presentation/bloc/diary_list/diary_list_bloc.dart';
 import 'package:bubimo/features/theme/data/datasources/theme_local_data_source.dart';
 import 'package:bubimo/features/theme/data/repositories/theme_repository_impl.dart';
@@ -39,7 +42,6 @@ import '../../features/diary_entry/data/repositories/sticker_repository_impl.dar
 import '../../features/diary_entry/domain/repositories/sticker_repository.dart';
 import '../../features/diary_entry/presentation/bloc/sticker_picker/sticker_picker_bloc.dart';
 
-
 import '../../features/theme/domain/repositories/theme_repository.dart';
 import '../../features/theme/domain/usecases/delete_custom_theme.dart';
 import '../../features/theme/domain/usecases/get_all_themes.dart';
@@ -74,6 +76,7 @@ import '../../features/backgrounds/presentation/bloc/background_picker/backgroun
 import '../services/supabase_storage_asset_service.dart';
 
 // cloud_backup
+import '../../features/cloud_backup/data/datasources/cloud_backup_local_datasource.dart';
 import '../../features/cloud_backup/data/datasources/google_auth_datasource.dart';
 import '../../features/cloud_backup/data/datasources/google_drive_datasource.dart';
 import '../../features/cloud_backup/data/repositories/cloud_backup_repository_impl.dart';
@@ -99,11 +102,11 @@ import '../../features/app_lock/domain/usecases/authenticate_with_biometrics.dar
 import '../../features/app_lock/domain/usecases/check_biometric_availability.dart';
 import '../../features/app_lock/domain/usecases/get_lock_config.dart';
 import '../../features/app_lock/domain/usecases/set_biometric_enabled.dart';
-import '../../features/app_lock/domain/usecases/set_lock_type.dart' as app_lock_usecase;
+import '../../features/app_lock/domain/usecases/set_lock_type.dart'
+    as app_lock_usecase;
 import '../../features/app_lock/domain/usecases/verify_pin.dart';
 import '../../features/app_lock/domain/usecases/verify_security_answer.dart';
 import '../../features/app_lock/presentation/bloc/lock_bloc.dart';
-
 
 final GetIt getIt = GetIt.instance;
 
@@ -239,16 +242,12 @@ Future<void> configureDependencies() async {
     () => ThemeRepositoryImpl(getIt<ThemeLocalDataSource>()),
   );
   getIt.registerLazySingleton(() => GetAllThemes(getIt<ThemeRepository>()));
-  getIt.registerLazySingleton(
-    () => GetSelectedTheme(getIt<ThemeRepository>()),
-  );
+  getIt.registerLazySingleton(() => GetSelectedTheme(getIt<ThemeRepository>()));
   getIt.registerLazySingleton(() => SelectTheme(getIt<ThemeRepository>()));
   getIt.registerLazySingleton(
     () => ResetToDefaultTheme(getIt<ThemeRepository>()),
   );
-  getIt.registerLazySingleton(
-    () => SaveCustomTheme(getIt<ThemeRepository>()),
-  );
+  getIt.registerLazySingleton(() => SaveCustomTheme(getIt<ThemeRepository>()));
   getIt.registerLazySingleton(
     () => DeleteCustomTheme(getIt<ThemeRepository>()),
   );
@@ -286,9 +285,7 @@ Future<void> configureDependencies() async {
   // which does a SINGLE getAllDiaryEntries() fetch and derives every
   // metric from that one result, instead of the previous pattern of 5
   // independent use cases each re-fetching every entry from scratch.
-  getIt.registerLazySingleton(
-    () => GetMoodCounts(getIt<GetAllDiaryEntries>()),
-  );
+  getIt.registerLazySingleton(() => GetMoodCounts(getIt<GetAllDiaryEntries>()));
   getIt.registerLazySingleton(
     () => GetCurrentStreak(getIt<GetAllDiaryEntries>()),
   );
@@ -298,9 +295,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => GetHeatmapData(getIt<GetAllDiaryEntries>()),
   );
-  getIt.registerLazySingleton(
-    () => GetEntryStats(getIt<GetAllDiaryEntries>()),
-  );
+  getIt.registerLazySingleton(() => GetEntryStats(getIt<GetAllDiaryEntries>()));
   getIt.registerLazySingleton(
     () => GetWordCountTrend(getIt<GetAllDiaryEntries>()),
   );
@@ -309,9 +304,7 @@ Future<void> configureDependencies() async {
   );
 
   getIt.registerFactory(
-    () => AnalyticsBloc(
-      getAnalyticsSnapshot: getIt<GetAnalyticsSnapshot>(),
-    ),
+    () => AnalyticsBloc(getAnalyticsSnapshot: getIt<GetAnalyticsSnapshot>()),
   );
 
   // --- profile ---
@@ -360,6 +353,13 @@ Future<void> configureDependencies() async {
   // being recreated per bloc instance, or every new CloudBackupBloc
   // would forget who's signed in.
   //
+  // CloudBackupLocalDataSource persists just the signed-in account's
+  // email via SharedPreferences, so `CloudBackupRepositoryImpl` can
+  // skip the native Google sign-in call entirely on repeat visits to
+  // the Cloud Backup screen when nothing has ever been linked (or the
+  // user explicitly signed out) — see its doc comment and
+  // `CloudBackupRepository.restoreSession`.
+  //
   // Depends on BackupLocalDataSource (registered under
   // --- backup (Import & Export) --- above) — cloud backup reuses that
   // exact archive-building/import logic rather than re-implementing
@@ -369,11 +369,13 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => GoogleDriveDataSource(getIt<GoogleAuthDataSource>()),
   );
+  getIt.registerLazySingleton(() => CloudBackupLocalDataSource());
   getIt.registerLazySingleton<CloudBackupRepository>(
     () => CloudBackupRepositoryImpl(
       authDataSource: getIt<GoogleAuthDataSource>(),
       driveDataSource: getIt<GoogleDriveDataSource>(),
       backupLocalDataSource: getIt<BackupLocalDataSource>(),
+      localDataSource: getIt<CloudBackupLocalDataSource>(),
     ),
   );
   // Factory — fresh per visit, same reasoning as BackupBloc: a stale
@@ -381,8 +383,6 @@ Future<void> configureDependencies() async {
   getIt.registerFactory(
     () => CloudBackupBloc(repository: getIt<CloudBackupRepository>()),
   );
-
-
 
   // --- reminders ---
   getIt.registerLazySingleton(
@@ -483,5 +483,10 @@ Future<void> configureDependencies() async {
       verifySecurityAnswer: getIt<VerifySecurityAnswer>(),
     ),
   );
-
+  getIt.registerLazySingleton<ContactRepository>(
+    () => const ContactRepositoryImpl(),
+  );
+  getIt.registerLazySingleton<SendSupportEmail>(
+    () => SendSupportEmail(getIt<ContactRepository>()),
+  );
 }

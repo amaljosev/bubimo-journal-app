@@ -15,6 +15,20 @@ import '../../../../core/error/exceptions.dart';
 const String kDriveAppDataScope =
     'https://www.googleapis.com/auth/drive.appdata';
 
+/// Guards every native call that can present UI (the account picker,
+/// and the Drive-scope consent sheet). Without this, dismissing that
+/// UI abnormally — swiping it away, or tapping the platform "X" close
+/// control instead of an explicit Cancel — can leave the underlying
+/// native completion handler never firing. When that happens the
+/// awaited Dart Future simply never resolves: the bloc stays `busy`
+/// forever, the "Sign in with Google" button never re-enables, and
+/// after long enough the OS itself flags the app as unresponsive. A
+/// timeout guarantees the Future always resolves one way or another,
+/// which is the only way to recover once the native side has gone
+/// silent — there's no cancellation API for an in-flight
+/// authenticate()/authorizeScopes() call to fall back on instead.
+const Duration _kInteractiveAuthTimeout = Duration(seconds: 90);
+
 /// Adds `Authorization: Bearer <token>` to every outgoing request, so
 /// `googleapis`' generated `drive.DriveApi` client can be built from a
 /// plain authenticated [http.Client].
@@ -79,14 +93,25 @@ class GoogleAuthDataSource {
     return _currentUser;
   }
 
+  /// Best-effort email of whichever account this datasource currently
+  /// considers signed in — null if none is known yet. Read this right
+  /// after a successful [signIn] to learn which account to persist.
+  String? get currentAccountEmail => _currentUser?.email;
+
   /// Interactive sign-in + Drive scope authorization (shows the account
   /// picker, and a consent screen if the scope hasn't been granted
   /// before).
   Future<void> signIn() async {
     await _ensureInitialized();
     try {
-      final GoogleSignInAccount account =
-          await GoogleSignIn.instance.authenticate();
+      final GoogleSignInAccount account = await GoogleSignIn.instance
+          .authenticate()
+          .timeout(
+            _kInteractiveAuthTimeout,
+            onTimeout: () => throw const AuthCancelledException(
+              message: 'Sign-in was dismissed.',
+            ),
+          );
       _currentUser = account;
 
       // Only call authorizeScopes if the Drive scope isn't already
@@ -96,8 +121,17 @@ class GoogleAuthDataSource {
       final existing =
           await account.authorizationClient.authorizationForScopes(_scopes);
       if (existing == null) {
-        await account.authorizationClient.authorizeScopes(_scopes);
+        await account.authorizationClient
+            .authorizeScopes(_scopes)
+            .timeout(
+              _kInteractiveAuthTimeout,
+              onTimeout: () => throw const AuthCancelledException(
+                message: 'Drive access request was dismissed.',
+              ),
+            );
       }
+    } on AuthCancelledException {
+      rethrow;
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) {
         throw const AuthCancelledException(message: 'Cancelled');
@@ -115,11 +149,18 @@ class GoogleAuthDataSource {
 
   /// Non-interactive (silent) sign-in. Returns true if a signed-in
   /// account was found.
+  ///
+  /// Callers that want to avoid the native call entirely when there is
+  /// no reason to believe an account is linked (first launch, or after
+  /// an explicit sign-out) should check their own locally-saved marker
+  /// BEFORE calling this — see `CloudBackupRepositoryImpl.restoreSession`.
+  /// This method itself has no such memory; it always asks Google.
   Future<bool> signInSilently() async {
     await _ensureInitialized();
     try {
-      final account =
-          await GoogleSignIn.instance.attemptLightweightAuthentication();
+      final account = await GoogleSignIn.instance
+          .attemptLightweightAuthentication()!
+          .timeout(_kInteractiveAuthTimeout, onTimeout: () => null);
       _currentUser = account;
       return account != null;
     } catch (_) {
@@ -158,7 +199,14 @@ class GoogleAuthDataSource {
           await account.authorizationClient.authorizationForScopes(
                 _scopes,
               ) ??
-              await account.authorizationClient.authorizeScopes(_scopes);
+              await account.authorizationClient
+                  .authorizeScopes(_scopes)
+                  .timeout(
+                    _kInteractiveAuthTimeout,
+                    onTimeout: () => throw const AuthCancelledException(
+                      message: 'Drive access request was dismissed.',
+                    ),
+                  );
 
       return _BearerAuthClient(http.Client(), authorization.accessToken);
     } on GoogleSignInException catch (e) {
