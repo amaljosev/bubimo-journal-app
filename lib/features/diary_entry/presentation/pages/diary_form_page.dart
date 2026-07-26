@@ -45,8 +45,8 @@ class DiaryFormPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => getIt<DiaryFormBloc>()
-        ..add(DiaryFormInitialized(entryId: entryId)),
+      create: (_) =>
+          getIt<DiaryFormBloc>()..add(DiaryFormInitialized(entryId: entryId)),
       child: const _DiaryFormView(),
     );
   }
@@ -118,19 +118,15 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   // unnecessary rebuilding of the editor's config on every rebuild.
   late final quill.QuillEditorConfig _quillEditorConfig =
       quill.QuillEditorConfig(
-    placeholder: "What's on your mind?",
-    padding: EdgeInsets.zero,
-    scrollable: false,
-    embedBuilders: [
-      // Custom builder first — Quill uses the first builder whose
-      // `key` matches, so this takes priority over the stock image
-      // builder below for the image embed type, giving it a working
-      // drag-to-resize handle on every platform (the stock builder
-      // only resizes via a desktop context menu).
-      ResizableImageEmbedBuilder(),
-      ...FlutterQuillEmbeds.editorBuilders(),
-    ],
-  );
+        placeholder: "What's on your mind?",
+        padding: EdgeInsets.zero,
+        scrollable: false,
+        embedBuilders: [
+          ResizableImageEmbedBuilder(),
+          DividerEmbedBuilder(),
+          ...FlutterQuillEmbeds.editorBuilders(),
+        ],
+      );
 
   // Captured once so listeners registered outside `build` (Quill
   // content changes) can dispatch bloc events without needing a
@@ -205,8 +201,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _contentChangeScheduled = false;
       if (!mounted || _quillController == null) return;
-      final deltaJson =
-          QuillDocumentUtils.contentFromController(_quillController!);
+      final deltaJson = QuillDocumentUtils.contentFromController(
+        _quillController!,
+      );
       _bloc.add(DiaryFormContentChanged(deltaJson));
     });
   }
@@ -284,10 +281,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                         // ever stops being true (e.g. this method gets
                         // reused with a different passed-in context).
                         if (this.context.mounted) {
-                          this
-                              .context
-                              .read<DiaryFormBloc>()
-                              .add(DiaryFormDateChanged(picked));
+                          this.context.read<DiaryFormBloc>().add(
+                            DiaryFormDateChanged(picked),
+                          );
                         }
                         if (sheetContext.mounted) {
                           Navigator.pop(sheetContext);
@@ -349,10 +345,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     final box =
         _editorBoundsKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
-    final scrollOffset =
-        _descriptionScrollController.hasClients
-            ? _descriptionScrollController.offset
-            : 0.0;
+    final scrollOffset = _descriptionScrollController.hasClients
+        ? _descriptionScrollController.offset
+        : 0.0;
     return Rect.fromLTWH(0, scrollOffset, box.size.width, box.size.height);
   }
 
@@ -427,9 +422,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         // earlier and then relied on, since this callback can run at
         // any point relative to this widget's lifecycle.
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.downloadError!)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(state.downloadError!)));
         }
         completer.complete(null);
       }
@@ -452,9 +447,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick image: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to pick image: $e')));
       }
     }
   }
@@ -468,9 +463,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick image: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to pick image: $e')));
       }
     }
   }
@@ -651,9 +646,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         }
         if (state.status == DiaryFormStatus.failure &&
             state.errorMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.errorMessage!)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(state.errorMessage!)));
         }
 
         // Initialize the title controller and Quill controller exactly
@@ -678,10 +673,8 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
             body: ErrorScreen(
               message: state.errorMessage ?? 'Something went wrong.',
               onRetry: () => context.read<DiaryFormBloc>().add(
-                    DiaryFormInitialized(
-                      entryId: state.entryId,
-                    ),
-                  ),
+                DiaryFormInitialized(entryId: state.entryId),
+              ),
             ),
           );
         }
@@ -700,8 +693,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
 
         // Save requires at least some content — either a title or a
         // non-empty description — mirroring the reference app's rule.
-        final canSave =
-            state.title.trim().isNotEmpty || _hasDescriptionText;
+        final canSave = state.title.trim().isNotEmpty || _hasDescriptionText;
 
         return Scaffold(
           extendBodyBehindAppBar: true,
@@ -721,9 +713,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                 child: Center(
                   child: FilledButton(
                     onPressed: (canSave && !state.isSubmitting)
-                        ? () => context
-                            .read<DiaryFormBloc>()
-                            .add(const DiaryFormSubmitted())
+                        ? () => context.read<DiaryFormBloc>().add(
+                            const DiaryFormSubmitted(),
+                          )
                         : null,
                     style: FilledButton.styleFrom(
                       shape: RoundedRectangleBorder(
@@ -763,7 +755,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
             child: SafeArea(
               child: Column(
                 children: [
-                
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                     child: Column(
@@ -789,7 +780,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                       ],
                     ),
                   ),
-                  
+
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
@@ -844,8 +835,12 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                   ),
                   DiaryBottomToolbar(
                     controller: _quillController!,
+                    editorFocusNode: _descriptionFocusNode,
+                    selectedFontFamily: state.fontFamily,
+                    onFontSelected: (family) => context
+                        .read<DiaryFormBloc>()
+                        .add(DiaryFormFontFamilyChanged(family)),
                     onBackgroundPressed: () => _openBackgroundPicker(context),
-                    onFontPressed: () => _openFontPicker(context),
                     onStickerPressed: () => _openStickerPicker(context),
                     onOverlayImagePressed: _pickOverlayImage,
                     onInlineImagePressed: _pickInlineImage,

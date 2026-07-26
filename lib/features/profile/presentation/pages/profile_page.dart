@@ -1,10 +1,8 @@
 // lib/features/profile/presentation/pages/profile_analytics_screen.dart
 
-import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/features/shared/presentation/widgets/appbar_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../../core/navigation/notched_nav_bar.dart'
     show kNavBarHeight;

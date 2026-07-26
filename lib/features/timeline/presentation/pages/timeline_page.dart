@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:table_calendar/table_calendar.dart';
-
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/background_image_theme_extension.dart';
 import '../../../diary_entry/domain/entities/diary_entry.dart';
@@ -149,12 +148,6 @@ class _TimelineViewState extends State<_TimelineView>
     });
   }
 
-  Future<void> _openCreateEntry() async {
-    final result = await context.push<bool>(AppRoutes.diaryForm);
-    if (result == true && mounted) {
-      context.read<DiaryListBloc>().add(const LoadDiaryEntries());
-    }
-  }
 
   // ── Day cell builder ─────────────────────────────────────────────────
 
@@ -204,19 +197,17 @@ class _TimelineViewState extends State<_TimelineView>
     ).extension<BackgroundImageTheme>()?.imagePath;
 
     return Scaffold(
-      appBar: bgImagePath != null
-          ? null
-          : myAppbar(
-              context,
-              'Timeline',
-              IconPill(
-                onTap: _goToFavorites,
-                color: Colors.redAccent,
-                icon: Icons.favorite,
-                textColor: Colors.white,
-                label: '',
-              ),
-            ),
+      appBar:bgImagePath!=null?null: myAppbar(
+        context,
+        'Timeline',
+        IconPill(
+          onTap: _goToFavorites,
+          color: Colors.redAccent,
+          icon: Icons.favorite,
+          textColor: Colors.white,
+          label: '',
+        ),
+      ),
       body: BlocBuilder<DiaryListBloc, DiaryListState>(
         buildWhen: (previous, current) =>
             previous.status != current.status ||
@@ -340,19 +331,7 @@ class _TimelineViewState extends State<_TimelineView>
           );
         },
       ),
-      // floatingActionButton: FloatingActionButton.extended(
-      //   heroTag: 'timeline_new_entry_fab',
-      //   onPressed: _openCreateEntry,
-      //   backgroundColor: theme.colorScheme.primary,
-      //   foregroundColor: theme.colorScheme.onPrimary,
-      //   elevation: 4,
-      //   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      //   icon: const Icon(Icons.edit_outlined, size: 20),
-      //   label: const Text(
-      //     'New Entry',
-      //     style: TextStyle(fontWeight: FontWeight.w700),
-      //   ),
-      // ),
+      
     );
   }
 }
