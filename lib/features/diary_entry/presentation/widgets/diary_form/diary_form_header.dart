@@ -111,12 +111,22 @@ class DiaryFormTitleField extends StatelessWidget {
   final FocusNode nextFocusNode;
   final ValueChanged<String> onChanged;
 
+  /// Mirrors the Quill description's current alignment (see
+  /// `DiaryFormState.alignment`, set from the bottom toolbar's T
+  /// panel) — the title is plain text and can't carry a Quill
+  /// attribute of its own, so this is how the same "whole entry"
+  /// alignment choice reaches it. Defaults to `TextAlign.start` to
+  /// match the field's previous unconfigured behavior when the caller
+  /// doesn't pass one.
+  final TextAlign textAlign;
+
   const DiaryFormTitleField({
     super.key,
     required this.controller,
     required this.focusNode,
     required this.nextFocusNode,
     required this.onChanged,
+    this.textAlign = TextAlign.start,
   });
 
   @override
@@ -126,6 +136,7 @@ class DiaryFormTitleField extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       maxLines: null,
+      textAlign: textAlign,
       textInputAction: TextInputAction.next,
       onTapOutside: (_) => focusNode.unfocus(),
       onSubmitted: (_) => nextFocusNode.requestFocus(),

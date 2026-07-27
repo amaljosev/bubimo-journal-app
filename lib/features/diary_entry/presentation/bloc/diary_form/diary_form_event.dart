@@ -72,6 +72,26 @@ final class DiaryFormFontFamilyChanged extends DiaryFormEvent {
   List<Object?> get props => [fontFamily];
 }
 
+/// Fired when the text-format panel's alignment control is changed.
+/// Applies to the whole entry — both the title field (rendered via
+/// `TextAlign` off this state field) and the Quill description (which
+/// applies the corresponding `quill.Attribute.align` itself,
+/// independently, since alignment is stored as Delta formatting for
+/// the description but as a plain state field for the title).
+///
+/// [alignment] is one of `'left'`, `'center'`, `'right'`, `'justify'`,
+/// matching the `String` values Quill's own alignment attributes use,
+/// so this field can be compared directly against
+/// `quill.Attribute.align`'s value without any translation.
+final class DiaryFormAlignmentChanged extends DiaryFormEvent {
+  final String alignment;
+
+  const DiaryFormAlignmentChanged(this.alignment);
+
+  @override
+  List<Object?> get props => [alignment];
+}
+
 /// Fired after a gallery photo is inserted into the document, so the
 /// denormalized `images` list stays in sync with what's actually in the
 /// content.

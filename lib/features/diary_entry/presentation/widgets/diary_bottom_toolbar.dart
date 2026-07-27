@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 
+import '../../../../core/theme/app_colors.dart';
+import '../../../theme/domain/entities/rgba_color.dart';
 import 'font_picker.dart';
 
 /// The single toolbar shown above the keyboard while editing a diary
@@ -12,35 +14,58 @@ import 'font_picker.dart';
 /// collapsed (no text selected) or expanded (text selected):
 ///
 /// - No selection → [_CommonToolsRow]: Undo, Redo, **T** (opens the
-///   text-formatting panel: alignment / headings / bold+underline /
-///   colors — colors here apply to the WHOLE document, since there's
-///   no selection to scope them to), **Aa** (font family picker),
+///   text-formatting panel: alignment / font size / bold / italic /
+///   underline — nothing else lives in this sheet anymore), **Aa**
+///   (font family picker), **A with a color swatch** (text color —
+///   its own dedicated toolbar item, applying to the whole document),
 ///   **Bullet** (opens the list panel: bullet / numbered / checklist),
 ///   Quote, Divider, then the image/sticker/background buttons.
 /// - Text selected → [_SelectionToolsRow]: character-level formatting
-///   for the selected run only (style, font color, highlight, clear
-///   formatting) — these correctly use `formatSelection`, which is
-///   scoped to the actual text selection.
+///   for the selected run only (style, font color, highlight) — these
+///   correctly use `formatSelection`, which is scoped to the actual
+///   text selection. The old trailing "Clear formatting" button has
+///   been removed — it never worked (there's no reliable way to know
+///   the pre-formatting state to clear back to from this row), and its
+///   job is already covered by toggling each active style off
+///   individually.
 ///
-/// EXACTLY ONE of {keyboard, an inline panel} is ever showing at a
-/// time, enforced by [_ActivePanel] living in this single widget:
-/// - Opening any panel (T, Bullet, Font, or the selection row's color
-///   panel) unfocuses the editor, closing the keyboard.
+/// EXACTLY ONE of {keyboard, an inline panel, the native text-selection
+/// toolbar} is ever showing at a time, enforced by [_ActivePanel] living
+/// in this single widget:
+/// - Opening any panel (T, Bullet, Font, Text color, or the selection
+///   row's color panel) unfocuses the editor, closing the keyboard.
 /// - Regaining editor focus (the keyboard coming back, e.g. the user
 ///   tapped back into the text) force-closes whatever panel was open.
+/// - The Quill selection becoming non-collapsed (the user selected
+///   text, which is about to show the native text-selection toolbar)
+///   also unfocuses the editor first, so the on-screen keyboard never
+///   overlaps that native toolbar.
 ///
 /// No panel is ever a modal `showModalBottomSheet` — a modal sheet
 /// would cover the editor, so the person couldn't see what they're
 /// formatting while picking it. Instead every panel (including the
-/// font picker, previously its own separate modal sheet) expands
-/// *above* this toolbar, like a tab bar's content area, sized to the
-/// keyboard's own height so it visually "replaces" the keyboard rather
-/// than adding extra space on top of it.
+/// font picker and the new text-color panel) expands *above* this
+/// toolbar, like a tab bar's content area, sized to the keyboard's own
+/// height so it visually "replaces" the keyboard rather than adding
+/// extra space on top of it. Tapping the editor area above dismisses
+/// whichever panel is open (the parent form page calls
+/// [DiaryBottomToolbarState.closeActivePanel] via a `GlobalKey` from a
+/// `GestureDetector` wrapping the editor), giving inline panels the
+/// same "tap outside to dismiss" feel a modal sheet would have had.
 class DiaryBottomToolbar extends StatefulWidget {
   final quill.QuillController controller;
   final FocusNode editorFocusNode;
   final String? selectedFontFamily;
   final ValueChanged<String?> onFontSelected;
+
+  /// Fired whenever the user changes alignment from the T panel.
+  /// [alignment] is `'left'`, `'center'`, `'right'`, or `'justify'` —
+  /// the parent form page is responsible for both applying it to the
+  /// title field (as `TextAlign`) and dispatching it to
+  /// `DiaryFormBloc`, since alignment is meant to apply to the whole
+  /// entry, not just the Quill description this toolbar sits under.
+  final ValueChanged<String> onAlignmentChanged;
+
   final VoidCallback onBackgroundPressed;
   final VoidCallback onStickerPressed;
   final VoidCallback onOverlayImagePressed;
@@ -52,6 +77,7 @@ class DiaryBottomToolbar extends StatefulWidget {
     required this.editorFocusNode,
     required this.selectedFontFamily,
     required this.onFontSelected,
+    required this.onAlignmentChanged,
     required this.onBackgroundPressed,
     required this.onStickerPressed,
     required this.onOverlayImagePressed,
@@ -59,16 +85,16 @@ class DiaryBottomToolbar extends StatefulWidget {
   });
 
   @override
-  State<DiaryBottomToolbar> createState() => _DiaryBottomToolbarState();
+  State<DiaryBottomToolbar> createState() => DiaryBottomToolbarState();
 }
 
 /// Which inline panel (if any) is currently expanded above the toolbar
 /// row. Only one can ever be active — opening a new one replaces
 /// whichever was previously open (from either row), and tapping the
 /// button that opened the currently-open panel closes it again.
-enum _ActivePanel { none, textFormat, list, font, selectionColor }
+enum _ActivePanel { none, textFormat, list, font, textColor, selectionColor }
 
-class _DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
+class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   static const double _barHeight = 48;
 
   /// Remembers the largest `viewInsets.bottom` seen while the keyboard
@@ -127,6 +153,17 @@ class _DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   void _onControllerChanged() {
     final hasSelection = !widget.controller.selection.isCollapsed;
     if (hasSelection != _lastHadSelection) {
+      // A fresh text selection is about to show the native
+      // text-selection toolbar (copy/cut/paste bubble). Unfocus the
+      // editor's FocusNode right away so the on-screen keyboard drops
+      // before that native toolbar appears — the two must never be on
+      // screen together. This does NOT clear the Quill selection
+      // itself (selection state lives in `controller.selection`, not
+      // in focus), so the selected text and its native toolbar are
+      // unaffected; only the software keyboard goes away.
+      if (hasSelection) {
+        widget.editorFocusNode.unfocus();
+      }
       // Only swap which row shows (common vs selection tools) — do NOT
       // close whatever panel is open. A panel should only ever close
       // because the user explicitly closes it (tapping its own button
@@ -191,6 +228,18 @@ class _DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     setState(() {
       _activePanel = opening ? panel : _ActivePanel.none;
     });
+  }
+
+  /// Closes whatever panel is currently open, if any — used before
+  /// performing an action that doesn't itself open a panel (Quote,
+  /// Divider) so a stale panel doesn't linger on screen once the
+  /// editor content has changed underneath it, and used by the
+  /// "tap the editor to dismiss" gesture the parent form page wires up
+  /// via [DiaryBottomToolbarState.closeActivePanel].
+  void closeActivePanel() {
+    if (_activePanel != _ActivePanel.none) {
+      setState(() => _activePanel = _ActivePanel.none);
+    }
   }
 
   void _openSelectionColorPanel({required bool isHighlight}) {
@@ -269,6 +318,7 @@ class _DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
                     controller: widget.controller,
                     activePanel: _activePanel,
                     onOpenPanel: _openPanel,
+                    onClosePanel: closeActivePanel,
                     onBackgroundPressed: widget.onBackgroundPressed,
                     onStickerPressed: widget.onStickerPressed,
                     onOverlayImagePressed: widget.onOverlayImagePressed,
@@ -283,14 +333,22 @@ class _DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   Widget _buildActivePanel(BuildContext context) {
     switch (_activePanel) {
       case _ActivePanel.textFormat:
-        return _TextFormatPanel(controller: widget.controller);
+        return _TextFormatPanel(
+          controller: widget.controller,
+          onAlignmentChanged: widget.onAlignmentChanged,
+        );
       case _ActivePanel.list:
-        return _ListPanel(controller: widget.controller);
+        return _ListPanel(
+          controller: widget.controller,
+          onStyleSelected: () => _openPanel(_ActivePanel.list),
+        );
       case _ActivePanel.font:
         return FontPicker(
           selectedFontFamily: widget.selectedFontFamily,
           onFontSelected: widget.onFontSelected,
         );
+      case _ActivePanel.textColor:
+        return _DocumentColorPanel(controller: widget.controller);
       case _ActivePanel.selectionColor:
         return _FontColorPanel(
           controller: widget.controller,
@@ -375,7 +433,7 @@ class _ToolbarDivider extends StatelessWidget {
 }
 
 /// Section label used inside the inline panels (e.g. "Alignment",
-/// "Headings") to visually group related controls.
+/// "Font size") to visually group related controls.
 class _PanelSectionLabel extends StatelessWidget {
   final String label;
 
@@ -420,6 +478,7 @@ class _CommonToolsRow extends StatefulWidget {
   final quill.QuillController controller;
   final _ActivePanel activePanel;
   final ValueChanged<_ActivePanel> onOpenPanel;
+  final VoidCallback onClosePanel;
   final VoidCallback onBackgroundPressed;
   final VoidCallback onStickerPressed;
   final VoidCallback onOverlayImagePressed;
@@ -430,6 +489,7 @@ class _CommonToolsRow extends StatefulWidget {
     required this.controller,
     required this.activePanel,
     required this.onOpenPanel,
+    required this.onClosePanel,
     required this.onBackgroundPressed,
     required this.onStickerPressed,
     required this.onOverlayImagePressed,
@@ -464,6 +524,12 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
   }
 
   void _insertDivider() {
+    // Quote/Divider both act immediately on the document rather than
+    // opening a panel of their own — but a DIFFERENT panel (T, Bullet,
+    // Font, Text color) might already be open from a previous tap.
+    // Close it first so the toolbar doesn't end up showing a stale
+    // panel above content that's just changed underneath it.
+    widget.onClosePanel();
     final index = widget.controller.selection.baseOffset.clamp(
       0,
       widget.controller.document.length,
@@ -473,6 +539,18 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
       0,
       DividerEmbed.instance,
       TextSelection.collapsed(offset: index + 1),
+    );
+  }
+
+  void _toggleQuote() {
+    // Same reasoning as `_insertDivider` — close any open panel before
+    // toggling the block quote.
+    widget.onClosePanel();
+    final isActive = _isBlockActive(quill.Attribute.blockQuote);
+    widget.controller.formatSelection(
+      isActive
+          ? quill.Attribute.clone(quill.Attribute.blockQuote, null)
+          : quill.Attribute.blockQuote,
     );
   }
 
@@ -486,13 +564,17 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
     final style = widget.controller.getSelectionStyle();
     final List<quill.Attribute> tracked = [
       quill.Attribute.align,
-      quill.Attribute.header,
+      quill.Attribute.size,
       quill.Attribute.bold,
+      quill.Attribute.italic,
       quill.Attribute.underline,
-      quill.Attribute.color,
-      quill.Attribute.background,
     ];
     return tracked.any((a) => style.attributes.containsKey(a.key));
+  }
+
+  bool get _hasDocumentTextColor {
+    final style = widget.controller.getSelectionStyle();
+    return style.attributes.containsKey(quill.Attribute.color.key);
   }
 
   @override
@@ -518,8 +600,11 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
                 : null,
           ),
           const _ToolbarDivider(),
-          // T — opens the text-formatting panel (alignment, headings,
-          // bold/underline, colors) above this toolbar.
+          // T — opens the text-formatting panel: alignment, font size,
+          // bold, italic, underline. Nothing else lives here anymore —
+          // headings and both color sections have their own entry
+          // points (colors moved to the dedicated "Text color" button
+          // below; there's no headings button in this redesign).
           _ToolbarIconButton(
             textLabel: 'T',
             tooltip: 'Text formatting',
@@ -527,13 +612,22 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
                 _isAnyTextFormatActive,
             onPressed: () => widget.onOpenPanel(_ActivePanel.textFormat),
           ),
-          // Aa — font family picker, now an inline panel like T/Bullet
-          // instead of its own modal sheet.
+          // Aa — font family picker, an inline panel like T/Bullet.
           _ToolbarIconButton(
             textLabel: 'Aa',
             tooltip: 'Font',
             isActive: widget.activePanel == _ActivePanel.font,
             onPressed: () => widget.onOpenPanel(_ActivePanel.font),
+          ),
+          // Text color — its own dedicated toolbar item (previously
+          // buried inside the T panel). Applies to the whole document,
+          // since this button only appears in the no-selection row.
+          _ToolbarIconButton(
+            icon: Icons.format_color_text_rounded,
+            tooltip: 'Text color',
+            isActive: widget.activePanel == _ActivePanel.textColor ||
+                _hasDocumentTextColor,
+            onPressed: () => widget.onOpenPanel(_ActivePanel.textColor),
           ),
           // Bullet — opens the list panel (bullet / numbered /
           // checklist) above this toolbar.
@@ -548,14 +642,7 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
             icon: Icons.format_quote_rounded,
             tooltip: 'Quote',
             isActive: _isBlockActive(quill.Attribute.blockQuote),
-            onPressed: () {
-              final isActive = _isBlockActive(quill.Attribute.blockQuote);
-              widget.controller.formatSelection(
-                isActive
-                    ? quill.Attribute.clone(quill.Attribute.blockQuote, null)
-                    : quill.Attribute.blockQuote,
-              );
-            },
+            onPressed: _toggleQuote,
           ),
           _ToolbarIconButton(
             icon: Icons.horizontal_rule_rounded,
@@ -590,20 +677,35 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
 }
 
 // ---------------------------------------------------------------------------
-// Text-format panel (opened by "T") — Alignment / Headings / Bold+Underline
-// / Colors, sectioned, scrollable, sized to keyboard height by the parent.
-//
-// Colors in THIS panel apply to the WHOLE document (there's no text
-// selection to scope them to when this panel is reachable at all — it
-// only shows in the no-selection common row), matching the "set this
-// entry's overall text color" intent, distinct from the selection
-// row's font-color panel which colors only the selected run.
+// Text-format panel (opened by "T") — Alignment / Font size / Bold / Italic
+// / Underline ONLY. Headings and colors have both been removed from this
+// sheet: headings had no home elsewhere in this redesign's requirements and
+// are dropped; colors now live in the dedicated "Text color" toolbar button
+// (see `_DocumentColorPanel`) and the selection row's existing color panel.
 // ---------------------------------------------------------------------------
+
+/// Font sizes offered in the T panel. `flutter_quill`'s `SizeAttribute`
+/// takes a numeric point-size string (e.g. `'20'`), NOT the
+/// `small`/`large`/`huge` CSS-class keywords from Quill.js on the web —
+/// those keywords are a different (web-only) attributor convention and
+/// aren't what this package's own editor/toolbar renders by default.
+/// "Normal" clears the attribute back to the document's base font size
+/// rather than setting an explicit value.
+const List<({String label, String? value})> _fontSizeOptions = [
+  (label: 'S', value: '12'),
+  (label: 'M', value: null), // Normal / default
+  (label: 'L', value: '20'),
+  (label: 'XL', value: '28'),
+];
 
 class _TextFormatPanel extends StatefulWidget {
   final quill.QuillController controller;
+  final ValueChanged<String> onAlignmentChanged;
 
-  const _TextFormatPanel({required this.controller});
+  const _TextFormatPanel({
+    required this.controller,
+    required this.onAlignmentChanged,
+  });
 
   @override
   State<_TextFormatPanel> createState() => _TextFormatPanelState();
@@ -633,6 +735,7 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
   }
 
   void _setAlignment(quill.Attribute alignment) {
+    final value = (alignment.value as String?) ?? 'left';
     if (alignment == quill.Attribute.leftAlignment) {
       widget.controller.formatSelection(
         quill.Attribute.clone(quill.Attribute.align, null),
@@ -640,21 +743,17 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
     } else {
       widget.controller.formatSelection(alignment);
     }
+    // Alignment applies to the whole entry, not just this Quill
+    // description — the title field is plain text, so it can't carry
+    // a Quill attribute. The parent form page listens for this and
+    // both dispatches `DiaryFormAlignmentChanged` to the bloc and
+    // applies the resulting `TextAlign` to the title's `TextField`.
+    widget.onAlignmentChanged(value);
   }
 
-  int? get _currentHeaderLevel {
+  String? get _currentFontSize {
     final style = widget.controller.getSelectionStyle();
-    final value = style.attributes[quill.Attribute.header.key]?.value as int?;
-    return value;
-  }
-
-  void _toggleHeader(int level, quill.Attribute headerAttribute) {
-    final isActive = _currentHeaderLevel == level;
-    widget.controller.formatSelection(
-      isActive
-          ? quill.Attribute.clone(quill.Attribute.header, null)
-          : headerAttribute,
-    );
+    return style.attributes[quill.Attribute.size.key]?.value as String?;
   }
 
   bool _isActive(quill.Attribute attribute) {
@@ -663,11 +762,11 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
   }
 
   /// Toggles [attribute] across the WHOLE document, not just from the
-  /// cursor onward. Same root cause as the color pickers below:
-  /// `formatSelection` with a collapsed cursor (always the case here,
-  /// since this panel only shows when nothing is selected) only affects
-  /// text typed AFTER this point — it never touches text that already
-  /// exists, which is why Bold/Underline appeared to do nothing.
+  /// cursor onward. With a collapsed cursor (always the case here,
+  /// since this panel only shows when nothing is selected),
+  /// `formatSelection` only affects text typed AFTER this point — it
+  /// never touches text that already exists, which is why Bold/Italic/
+  /// Underline would otherwise appear to do nothing.
   void _toggle(quill.Attribute attribute) {
     final isActive = _isActive(attribute);
     final length = widget.controller.document.length;
@@ -679,38 +778,24 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
     );
   }
 
-  static const List<String> _colorSwatches = [
-    '#F44336', '#E91E63', '#9C27B0', '#673AB7',
-    '#3F51B5', '#2196F3', '#03A9F4', '#00BCD4',
-    '#009688', '#4CAF50', '#FFC107', '#795548',
-  ];
-
-  /// Applies [hex] to the WHOLE document, not just the cursor — with a
-  /// collapsed selection (no text highlighted, which is always the
-  /// case while this panel is even reachable), `formatSelection` only
-  /// affects text typed AFTER this point, leaving everything already
-  /// written unchanged. Explicitly formatting the full range
-  /// (`0` to `document.length`) is what actually recolors existing
-  /// text, matching "set this entry's whole-document color".
-  void _applyColorToWholeDocument(String hex, {required bool isHighlight}) {
+  /// Applies [value] (a numeric point-size string, or `null` to clear
+  /// back to the default size) across the WHOLE document — same
+  /// collapsed-cursor reasoning as `_toggle` above: this panel only
+  /// shows with nothing selected, so `formatSelection` alone would
+  /// only affect text typed from here on, not what's already written.
+  void _applyFontSizeToWholeDocument(String? value) {
     final length = widget.controller.document.length;
     if (length == 0) return;
     widget.controller.formatText(
       0,
       length,
-      isHighlight ? quill.BackgroundAttribute(hex) : quill.ColorAttribute(hex),
-    );
-  }
-
-  void _clearColorFromWholeDocument({required bool isHighlight}) {
-    final length = widget.controller.document.length;
-    if (length == 0) return;
-    final attribute =
-        isHighlight ? quill.Attribute.background : quill.Attribute.color;
-    widget.controller.formatText(
-      0,
-      length,
-      quill.Attribute.clone(attribute, null),
+      value == null
+          ? quill.Attribute.clone(quill.Attribute.size, null)
+          : quill.Attribute(
+              quill.Attribute.size.key,
+              quill.AttributeScope.inline,
+              value,
+            ),
     );
   }
 
@@ -740,37 +825,28 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
               ],
             ),
           ),
-          const _PanelSectionLabel('Headings'),
+          const _PanelSectionLabel('Font size'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
-                _ToolbarIconButton(
-                  textLabel: 'H1',
-                  tooltip: 'Heading 1',
-                  isActive: _currentHeaderLevel == 1,
-                  onPressed: () => _toggleHeader(1, quill.Attribute.h1),
-                ),
-                const SizedBox(width: 4),
-                _ToolbarIconButton(
-                  textLabel: 'H2',
-                  tooltip: 'Heading 2',
-                  isActive: _currentHeaderLevel == 2,
-                  onPressed: () => _toggleHeader(2, quill.Attribute.h2),
-                ),
-                const SizedBox(width: 4),
-                _ToolbarIconButton(
-                  textLabel: 'H3',
-                  tooltip: 'Heading 3',
-                  isActive: _currentHeaderLevel == 3,
-                  onPressed: () => _toggleHeader(3, quill.Attribute.h3),
-                ),
+                for (final option in _fontSizeOptions)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: _ToolbarIconButton(
+                      textLabel: option.label,
+                      tooltip: option.label,
+                      isActive: option.value == _currentFontSize,
+                      onPressed: () =>
+                          _applyFontSizeToWholeDocument(option.value),
+                    ),
+                  ),
               ],
             ),
           ),
           const _PanelSectionLabel('Style'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
             child: Row(
               children: [
                 _ToolbarIconButton(
@@ -778,6 +854,13 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
                   tooltip: 'Bold',
                   isActive: _isActive(quill.Attribute.bold),
                   onPressed: () => _toggle(quill.Attribute.bold),
+                ),
+                const SizedBox(width: 4),
+                _ToolbarIconButton(
+                  icon: Icons.format_italic_rounded,
+                  tooltip: 'Italic',
+                  isActive: _isActive(quill.Attribute.italic),
+                  onPressed: () => _toggle(quill.Attribute.italic),
                 ),
                 const SizedBox(width: 4),
                 _ToolbarIconButton(
@@ -789,67 +872,120 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Colors below apply to the whole entry',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                  ),
-            ),
-          ),
-          const _PanelSectionLabel('Text color'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final hex in _colorSwatches)
-                  _ColorSwatch(
-                    hex: hex,
-                    onTap: () =>
-                        _applyColorToWholeDocument(hex, isHighlight: false),
-                  ),
-                _ClearColorSwatch(
-                  onTap: () =>
-                      _clearColorFromWholeDocument(isHighlight: false),
-                ),
-              ],
-            ),
-          ),
-          const _PanelSectionLabel('Highlight color'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final hex in _colorSwatches)
-                  _ColorSwatch(
-                    hex: hex,
-                    onTap: () =>
-                        _applyColorToWholeDocument(hex, isHighlight: true),
-                  ),
-                _ClearColorSwatch(
-                  onTap: () =>
-                      _clearColorFromWholeDocument(isHighlight: true),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-class _ColorSwatch extends StatelessWidget {
-  final String hex;
+// ---------------------------------------------------------------------------
+// Text color panel (opened by the new dedicated "Text color" toolbar
+// button) — applies to the WHOLE document, same scoping rule the old
+// in-T-panel color sections used, since this button only ever appears
+// in the no-selection common row. Swatches are sourced from
+// `AppColors.forRole(AppColorRole.text, ...)` rather than a hardcoded
+// hex list, per the app's single-source-of-truth palette rule.
+// ---------------------------------------------------------------------------
+
+class _DocumentColorPanel extends StatefulWidget {
+  final quill.QuillController controller;
+
+  const _DocumentColorPanel({required this.controller});
+
+  @override
+  State<_DocumentColorPanel> createState() => _DocumentColorPanelState();
+}
+
+class _DocumentColorPanelState extends State<_DocumentColorPanel> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  void _applyToWholeDocument(String hex) {
+    final length = widget.controller.document.length;
+    if (length == 0) return;
+    widget.controller.formatText(0, length, quill.ColorAttribute(hex));
+  }
+
+  void _clearFromWholeDocument() {
+    final length = widget.controller.document.length;
+    if (length == 0) return;
+    widget.controller.formatText(
+      0,
+      length,
+      quill.Attribute.clone(quill.Attribute.color, null),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final swatches =
+        AppColors.forRole(AppColorRole.text, isDark: isDark);
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Text color', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    for (final swatch in swatches)
+                      _RgbaColorSwatch(
+                        color: swatch,
+                        onTap: () => _applyToWholeDocument(_toHex(swatch)),
+                      ),
+                    _ClearColorSwatch(onTap: _clearFromWholeDocument),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Converts an [RgbaColor] to the `#RRGGBB` hex string Quill's
+/// `ColorAttribute`/`BackgroundAttribute` expect. `RgbaColor` only
+/// exposes `.toColor()` (a Flutter `Color`), not a hex string directly,
+/// so this small helper bridges the two at the one place in the
+/// toolbar that needs it. Opacity is intentionally dropped — Quill's
+/// color attributes are opaque RGB hex only.
+String _toHex(RgbaColor rgbaColor) {
+  final r = rgbaColor.red.clamp(0, 255).toRadixString(16).padLeft(2, '0');
+  final g = rgbaColor.green.clamp(0, 255).toRadixString(16).padLeft(2, '0');
+  final b = rgbaColor.blue.clamp(0, 255).toRadixString(16).padLeft(2, '0');
+  return '#$r$g$b';
+}
+
+class _RgbaColorSwatch extends StatelessWidget {
+  final RgbaColor color;
   final VoidCallback onTap;
 
-  const _ColorSwatch({required this.hex, required this.onTap});
+  const _RgbaColorSwatch({required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -860,7 +996,7 @@ class _ColorSwatch extends StatelessWidget {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000),
+          color: color.toColor(),
           shape: BoxShape.circle,
           border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
@@ -898,13 +1034,21 @@ class _ClearColorSwatch extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// List panel (opened by the bullet button) — Bullet / Numbered / Checklist
+// List panel (opened by the bullet button) — Bullet / Numbered / Checklist.
+// Selecting any style now closes the panel automatically afterward.
 // ---------------------------------------------------------------------------
 
 class _ListPanel extends StatefulWidget {
   final quill.QuillController controller;
 
-  const _ListPanel({required this.controller});
+  /// Called right after a style is applied, so the parent can close
+  /// this panel — the list panel is a one-shot picker (per req #7:
+  /// "after the user selects a bullet style, automatically close the
+  /// bottom sheet"), unlike T/Font/Text-color which stay open for
+  /// multiple adjustments.
+  final VoidCallback onStyleSelected;
+
+  const _ListPanel({required this.controller, required this.onStyleSelected});
 
   @override
   State<_ListPanel> createState() => _ListPanelState();
@@ -938,6 +1082,7 @@ class _ListPanelState extends State<_ListPanel> {
     widget.controller.formatSelection(
       isActive ? quill.Attribute.clone(attribute, null) : attribute,
     );
+    widget.onStyleSelected();
   }
 
   @override
@@ -1016,38 +1161,6 @@ class _SelectionToolsRowState extends State<_SelectionToolsRow> {
     if (mounted) setState(() {});
   }
 
-  bool get _hasAnyCharacterStyle {
-    final style = widget.controller.getSelectionStyle();
-    final List<quill.Attribute> characterAttributes = [
-      quill.Attribute.bold,
-      quill.Attribute.italic,
-      quill.Attribute.underline,
-      quill.Attribute.strikeThrough,
-      quill.Attribute.color,
-      quill.Attribute.background,
-    ];
-    return characterAttributes.any(
-      (a) => style.attributes.containsKey(a.key),
-    );
-  }
-
-  void _clearFormatting() {
-    final style = widget.controller.getSelectionStyle();
-    final List<quill.Attribute> characterAttributes = [
-      quill.Attribute.bold,
-      quill.Attribute.italic,
-      quill.Attribute.underline,
-      quill.Attribute.strikeThrough,
-      quill.Attribute.color,
-      quill.Attribute.background,
-    ];
-    for (final attribute in characterAttributes) {
-      if (style.attributes.containsKey(attribute.key)) {
-        widget.controller.formatSelection(quill.Attribute.clone(attribute, null));
-      }
-    }
-  }
-
   Future<void> _openStylePicker() async {
     final style = widget.controller.getSelectionStyle();
     await showModalBottomSheet<void>(
@@ -1102,12 +1215,12 @@ class _SelectionToolsRowState extends State<_SelectionToolsRow> {
             isActive: colorPanelOpen,
             onPressed: () => widget.onOpenColorPanel(isHighlight: true),
           ),
-          const _ToolbarDivider(),
-          _ToolbarIconButton(
-            icon: Icons.format_clear_rounded,
-            tooltip: 'Clear formatting',
-            onPressed: _hasAnyCharacterStyle ? _clearFormatting : null,
-          ),
+          // The old trailing "Clear formatting" button has been
+          // removed entirely (req #9) — it was the last button in this
+          // row and didn't work reliably, and toggling each active
+          // style back off individually (via the style picker or these
+          // color buttons' own "clear" swatch) already covers the same
+          // need.
         ],
       ),
     );
@@ -1123,7 +1236,7 @@ class _SelectionToolsRowState extends State<_SelectionToolsRow> {
 /// covering the editor briefly here doesn't lose the selection (Quill
 /// keeps the selection alive under a modal), so there's no "can't see
 /// what I'm formatting" problem the inline-panel approach exists to
-/// solve for T/Bullet/Font/the-other-color-panel.
+/// solve for T/Bullet/Font/Text-color/the-selection-color-panel.
 class _StylePickerSheet extends StatefulWidget {
   final quill.QuillController controller;
   final quill.Style initialStyle;
@@ -1219,9 +1332,13 @@ class _StyleRow extends StatelessWidget {
 
 /// Font color / highlight color panel for the SELECTION row — applies
 /// only to the actual text selection via `formatSelection`, unlike the
-/// common toolbar's T-panel colors (which apply document-wide, since
-/// no selection exists in that context). Sized to keyboard height by
-/// the parent, same as every other panel.
+/// common toolbar's dedicated "Text color" button (which applies
+/// document-wide, since no selection exists in that context). Sized to
+/// keyboard height by the parent, same as every other panel. Swatches
+/// are sourced from `AppColors` rather than a hardcoded hex list, same
+/// as `_DocumentColorPanel` — text color uses the text role for both;
+/// highlight reuses the same text-role palette since there's no
+/// dedicated "highlight" role in `AppColors`.
 class _FontColorPanel extends StatelessWidget {
   final quill.QuillController controller;
   final bool isHighlight;
@@ -1232,14 +1349,6 @@ class _FontColorPanel extends StatelessWidget {
     this.isHighlight = false,
     required this.onDone,
   });
-
-  static const List<String> _swatches = [
-    '#F44336', '#E91E63', '#9C27B0', '#673AB7',
-    '#3F51B5', '#2196F3', '#03A9F4', '#00BCD4',
-    '#009688', '#4CAF50', '#8BC34A', '#CDDC39',
-    '#FFEB3B', '#FFC107', '#FF9800', '#795548',
-    '#9E9E9E', '#607D8B', '#000000', '#FFFFFF',
-  ];
 
   void _apply(String hex) {
     controller.formatSelection(
@@ -1255,6 +1364,9 @@ class _FontColorPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final swatches = AppColors.forRole(AppColorRole.text, isDark: isDark);
+
     return SafeArea(
       top: false,
       child: Padding(
@@ -1278,8 +1390,11 @@ class _FontColorPanel extends StatelessWidget {
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    for (final hex in _swatches)
-                      _ColorSwatch(hex: hex, onTap: () => _apply(hex)),
+                    for (final swatch in swatches)
+                      _RgbaColorSwatch(
+                        color: swatch,
+                        onTap: () => _apply(_toHex(swatch)),
+                      ),
                     _ClearColorSwatch(onTap: _clear),
                   ],
                 ),

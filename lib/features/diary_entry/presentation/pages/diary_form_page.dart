@@ -8,7 +8,6 @@ import 'package:bubimo/core/utils/quill_document_utils.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_bottom_toolbar.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/diary_form_header.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/diary_form_overlay_settings_sheet.dart';
-import 'package:bubimo/features/diary_entry/presentation/widgets/font_picker.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/mood_popover.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/overlay/overlay_layer.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/overlay/resizable_image_embed_builder.dart';
@@ -91,6 +90,15 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   // Anchors the mood popover so it appears directly below the mood
   // avatar in the header, like a speech bubble pointing back up at it.
   final GlobalKey _moodAvatarKey = GlobalKey();
+
+  // Lets the editor-area GestureDetector below reach into
+  // `DiaryBottomToolbarState.closeActivePanel()` — tapping the editor
+  // area is this app's equivalent of "tap outside to dismiss" for the
+  // toolbar's inline panels (T/Font/Text color/Bullet aren't modal
+  // sheets, so there's no real "outside" a modal-dismiss gesture could
+  // attach to; this recreates that feel without covering the editor).
+  final GlobalKey<DiaryBottomToolbarState> _toolbarKey =
+      GlobalKey<DiaryBottomToolbarState>();
 
   // Created once the entry (or blank create form) has finished loading,
   // since Quill's controller needs its initial document up front rather
@@ -581,26 +589,34 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     _bloc.add(DiaryFormFontFamilyChanged(fontFamily));
   }
 
-  void _openFontPicker(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => FontPicker(
-        selectedFontFamily: _bloc.state.fontFamily,
-        onFontSelected: (family) {
-          _applyFontFamily(family);
-          // Pop using the sheet's own context, not the outer page
-          // context captured when the sheet was opened — the sheet's
-          // element is guaranteed live for as long as this callback can
-          // fire (it's owned by the sheet itself), whereas the outer
-          // page context could in principle have gone stale by now.
-          if (sheetContext.mounted) {
-            Navigator.pop(sheetContext);
-          }
-        },
-      ),
-    );
+  /// Converts `DiaryFormState.alignment` (`'left'`/`'center'`/
+  /// `'right'`/`'justify'`, matching Quill's own attribute values) into
+  /// Flutter's `TextAlign` for the title field. `'justify'` maps to
+  /// `TextAlign.justify` even though a single-line title rarely shows
+  /// any visible difference from `left` — kept 1:1 with the Quill side
+  /// rather than silently collapsing it to `left`, so the two fields
+  /// never visibly disagree if the title ever wraps to multiple lines.
+  TextAlign _textAlignFor(String alignment) {
+    switch (alignment) {
+      case 'center':
+        return TextAlign.center;
+      case 'right':
+        return TextAlign.right;
+      case 'justify':
+        return TextAlign.justify;
+      case 'left':
+      default:
+        return TextAlign.left;
+    }
+  }
+
+  /// Called from the T panel's alignment control. Applies the chosen
+  /// alignment to the title field (via bloc state → `TextAlign`, since
+  /// the title is a plain `TextField` and can't carry a Quill
+  /// attribute) in addition to whatever the Quill editor itself already
+  /// applied to the description directly.
+  void _onAlignmentChanged(String alignment) {
+    _bloc.add(DiaryFormAlignmentChanged(alignment));
   }
 
   Future<void> _openBackgroundPicker(BuildContext context) async {
@@ -772,6 +788,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                           controller: _titleController,
                           focusNode: _titleFocusNode,
                           nextFocusNode: _descriptionFocusNode,
+                          textAlign: _textAlignFor(state.alignment),
                           onChanged: (value) => context
                               .read<DiaryFormBloc>()
                               .add(DiaryFormTitleChanged(value)),
@@ -784,47 +801,65 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        return Container(
-                          key: _editorBoundsKey,
-                          width: constraints.maxWidth,
-                          height: constraints.maxHeight,
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                          child: SingleChildScrollView(
-                            controller: _descriptionScrollController,
-                            physics: const BouncingScrollPhysics(),
-                            child: OverlayLayer(
-                              boundsKey: _editorBoundsKey,
-                              images: state.overlayImages,
-                              stickers: state.stickers,
-                              selectedImageId: state.selectedOverlayImageId,
-                              selectedStickerId: state.selectedStickerId,
-                              onSelectImage: _onOverlayImageSelect,
-                              onSelectSticker: _onStickerSelect,
-                              onDeselect: _onOverlayImageDeselect,
-                              onImageTransform: _onOverlayImageTransform,
-                              onStickerTransform: _onStickerTransform,
-                              onRemoveImage: _onOverlayImageRemove,
-                              onRemoveSticker: _onStickerRemove,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minHeight: constraints.maxHeight,
-                                ),
-                                // A stable key (not tied to `state`, so
-                                // it never changes across the
-                                // per-keystroke rebuilds this screen
-                                // does) makes absolutely sure Flutter
-                                // treats this as the *same* element
-                                // every rebuild rather than ever
-                                // tearing it down and recreating it —
-                                // it normally would anyway since this
-                                // is the only widget of this type/
-                                // position in its parent, but pinning
-                                // it explicitly removes any doubt.
-                                child: quill.QuillEditor.basic(
-                                  key: _quillEditorKey,
-                                  controller: _quillController!,
-                                  focusNode: _descriptionFocusNode,
-                                  config: _quillEditorConfig,
+                        return GestureDetector(
+                          // Closes any open toolbar panel (T, Font,
+                          // Text color, Bullet) the instant the editor
+                          // area itself is tapped — since those panels
+                          // are inline rather than modal sheets, this
+                          // is what stands in for "tap outside to
+                          // dismiss." `HitTestBehavior.translucent` lets
+                          // the tap still reach through to Quill's own
+                          // tap handling underneath (placing the
+                          // cursor, focusing the editor) and to
+                          // `OverlayLayer`'s own deselect handling —
+                          // this detector only observes the tap to
+                          // close the panel, it never consumes it.
+                          behavior: HitTestBehavior.translucent,
+                          onTap: () =>
+                              _toolbarKey.currentState?.closeActivePanel(),
+                          child: Container(
+                            key: _editorBoundsKey,
+                            width: constraints.maxWidth,
+                            height: constraints.maxHeight,
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                            child: SingleChildScrollView(
+                              controller: _descriptionScrollController,
+                              physics: const BouncingScrollPhysics(),
+                              child: OverlayLayer(
+                                boundsKey: _editorBoundsKey,
+                                images: state.overlayImages,
+                                stickers: state.stickers,
+                                selectedImageId: state.selectedOverlayImageId,
+                                selectedStickerId: state.selectedStickerId,
+                                onSelectImage: _onOverlayImageSelect,
+                                onSelectSticker: _onStickerSelect,
+                                onDeselect: _onOverlayImageDeselect,
+                                onImageTransform: _onOverlayImageTransform,
+                                onStickerTransform: _onStickerTransform,
+                                onRemoveImage: _onOverlayImageRemove,
+                                onRemoveSticker: _onStickerRemove,
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    minHeight: constraints.maxHeight,
+                                  ),
+                                  // A stable key (not tied to `state`,
+                                  // so it never changes across the
+                                  // per-keystroke rebuilds this screen
+                                  // does) makes absolutely sure Flutter
+                                  // treats this as the *same* element
+                                  // every rebuild rather than ever
+                                  // tearing it down and recreating it —
+                                  // it normally would anyway since this
+                                  // is the only widget of this type/
+                                  // position in its parent, but pinning
+                                  // it explicitly removes any doubt.
+                                  child: quill.QuillEditor.basic(
+                                    key: _quillEditorKey,
+                                    controller: _quillController!,
+                                    focusNode: _descriptionFocusNode,
+                                    config: _quillEditorConfig,
+                                  ),
                                 ),
                               ),
                             ),
@@ -834,12 +869,19 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                     ),
                   ),
                   DiaryBottomToolbar(
+                    key: _toolbarKey,
                     controller: _quillController!,
                     editorFocusNode: _descriptionFocusNode,
                     selectedFontFamily: state.fontFamily,
-                    onFontSelected: (family) => context
-                        .read<DiaryFormBloc>()
-                        .add(DiaryFormFontFamilyChanged(family)),
+                    // Fixed: previously this only dispatched the bloc
+                    // event and never actually reformatted the Quill
+                    // document, so picking a font updated
+                    // `DiaryFormState.fontFamily` but left existing
+                    // text visually unchanged. `_applyFontFamily`
+                    // (below) does both — same helper the old modal
+                    // font-picker sheet used to call.
+                    onFontSelected: _applyFontFamily,
+                    onAlignmentChanged: _onAlignmentChanged,
                     onBackgroundPressed: () => _openBackgroundPicker(context),
                     onStickerPressed: () => _openStickerPicker(context),
                     onOverlayImagePressed: _pickOverlayImage,

@@ -44,6 +44,13 @@ class DiaryFormState extends Equatable {
   final Mood? mood;
   final String? fontFamily;
 
+  /// Text alignment applied to both the title field (via `TextAlign`)
+  /// and, independently, the Quill description (via
+  /// `quill.Attribute.align`). One of `'left'`, `'center'`, `'right'`,
+  /// `'justify'` — defaults to `'left'`, matching Quill's own default
+  /// when no alignment attribute is set.
+  final String alignment;
+
   /// Denormalized cache of gallery photo asset paths inserted into
   /// [content] via the rich editor's image picker. Kept in sync by
   /// [DiaryFormImageAdded] rather than re-parsed from the Delta JSON on
@@ -104,6 +111,7 @@ class DiaryFormState extends Equatable {
     required this.date,
     this.mood,
     this.fontFamily,
+    this.alignment = 'left',
     this.images = const [],
     this.overlayImages = const [],
     this.stickers = const [],
@@ -136,6 +144,7 @@ class DiaryFormState extends Equatable {
     Mood? mood,
     bool clearMood = false,
     String? fontFamily,
+    String? alignment,
     List<String>? images,
     List<OverlayImage>? overlayImages,
     List<Sticker>? stickers,
@@ -160,6 +169,7 @@ class DiaryFormState extends Equatable {
       date: date ?? this.date,
       mood: clearMood ? null : (mood ?? this.mood),
       fontFamily: fontFamily ?? this.fontFamily,
+      alignment: alignment ?? this.alignment,
       images: images ?? this.images,
       overlayImages: overlayImages ?? this.overlayImages,
       stickers: stickers ?? this.stickers,
@@ -193,6 +203,7 @@ class DiaryFormState extends Equatable {
         date,
         mood,
         fontFamily,
+        alignment,
         images,
         overlayImages,
         stickers,

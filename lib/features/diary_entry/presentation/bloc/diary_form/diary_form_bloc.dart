@@ -64,6 +64,7 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     on<DiaryFormDateChanged>(_onDateChanged);
     on<DiaryFormMoodChanged>(_onMoodChanged);
     on<DiaryFormFontFamilyChanged>(_onFontFamilyChanged);
+    on<DiaryFormAlignmentChanged>(_onAlignmentChanged);
     on<DiaryFormImageAdded>(_onImageAdded);
     on<DiaryFormOverlayImageAdded>(_onOverlayImageAdded);
     on<DiaryFormOverlayImageTransformed>(_onOverlayImageTransformed);
@@ -163,6 +164,13 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     Emitter<DiaryFormState> emit,
   ) {
     emit(state.copyWith(fontFamily: event.fontFamily));
+  }
+
+  void _onAlignmentChanged(
+    DiaryFormAlignmentChanged event,
+    Emitter<DiaryFormState> emit,
+  ) {
+    emit(state.copyWith(alignment: event.alignment));
   }
 
   void _onImageAdded(
