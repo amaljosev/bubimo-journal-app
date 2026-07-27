@@ -297,6 +297,35 @@ class BackupLocalDataSource {
     }
     json['stickers'] = rewrittenStickers;
 
+    // Inline images embedded directly in the Quill Delta JSON (not
+    // just referenced via the denormalized `entry.images` list) need
+    // the exact same bundling as every other media path — otherwise an
+    // inline image renders fine right up until the entry is backed up
+    // and restored, since the embed itself would still point at this
+    // device's now-gone directory. See
+    // BackupDiaryEntryModel.extractContentImagePaths's doc comment.
+    final rawContent = entry.content;
+    if (rawContent != null && rawContent.isNotEmpty) {
+      final embeddedPaths =
+          BackupDiaryEntryModel.extractContentImagePaths(rawContent);
+      final contentPathRewrites = <String, String>{};
+      for (final embeddedPath in embeddedPaths) {
+        final rewritten = await rewriteAndBundle(
+          embeddedPath,
+          MediaCategory.diaryImages,
+        );
+        // If the file's gone, rewriteAndBundle returns null and this
+        // path is simply left out of the rewrite map — the embed keeps
+        // its original (now-broken) path, same "can't recover a
+        // deleted file" outcome as every other field above.
+        if (rewritten != null) contentPathRewrites[embeddedPath] = rewritten;
+      }
+      json['content'] = BackupDiaryEntryModel.rewriteContentImagePaths(
+        rawContent,
+        contentPathRewrites,
+      );
+    }
+
     return json;
   }
 
@@ -486,6 +515,20 @@ class BackupLocalDataSource {
         if (item is Map<String, dynamic>) {
           await resolveOne(item['localPath'] as String?);
         }
+      }
+    }
+
+    // Inline images embedded directly in the entry's Quill Delta JSON
+    // content — mirrors export's identical handling in
+    // _rewriteEntryPathsForExport. These bundle-relative paths use the
+    // same media/diary_images/... form as every other diaryImages
+    // path, so _categoryFromBundlePath resolves them the same way.
+    final rawContent = rawEntry['content'];
+    if (rawContent is String && rawContent.isNotEmpty) {
+      final embeddedPaths =
+          BackupDiaryEntryModel.extractContentImagePaths(rawContent);
+      for (final embeddedPath in embeddedPaths) {
+        await resolveOne(embeddedPath);
       }
     }
 
