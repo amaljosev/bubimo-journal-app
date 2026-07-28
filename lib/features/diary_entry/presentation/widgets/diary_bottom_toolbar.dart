@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/theme_tokens.dart';
 import '../../../theme/domain/entities/rgba_color.dart';
 import 'font_picker.dart';
 
@@ -31,27 +32,38 @@ import 'font_picker.dart';
 ///
 /// EXACTLY ONE of {keyboard, an inline panel, the native text-selection
 /// toolbar} is ever showing at a time, enforced by [_ActivePanel] living
-/// in this single widget:
+/// in this single widget — and enforced DETERMINISTICALLY, not by
+/// reacting to focus/keyboard-visibility after the fact:
 /// - Opening any panel (T, Bullet, Font, Text color, or the selection
-///   row's color panel) unfocuses the editor, closing the keyboard.
-/// - Regaining editor focus (the keyboard coming back, e.g. the user
-///   tapped back into the text) force-closes whatever panel was open.
+///   row's color panel) unfocuses the editor immediately, closing the
+///   keyboard, and every formatting action taken inside an open panel
+///   re-asserts that unfocus in the same frame afterward (some
+///   `flutter_quill` formatting calls can otherwise silently reclaim
+///   focus, which used to pop the keyboard back up over a still-open
+///   panel — see `_reassertUnfocus`).
 /// - The Quill selection becoming non-collapsed (the user selected
-///   text, which is about to show the native text-selection toolbar)
-///   also unfocuses the editor first, so the on-screen keyboard never
+///   text, about to show the native text-selection toolbar) also
+///   unfocuses the editor first, so the on-screen keyboard never
 ///   overlaps that native toolbar.
+/// - Closing a panel is NEVER triggered by a focus-change listener
+///   guessing whether the keyboard "really" came back — that approach
+///   was fragile and caused exactly the flicker/both-visible bugs this
+///   version fixes. Panels only close for one of two explicit,
+///   synchronous reasons: the same toolbar button is tapped again
+///   ([closeActivePanel], used internally by Quote/Divider/etc.), or
+///   the person taps away from the toolbar entirely
+///   ([closeActivePanelAndRestoreFocus], wired up by the parent form
+///   page over the editor area, the title field, and the rest of the
+///   screen), which both closes the panel AND explicitly requests
+///   focus back so the keyboard reappears in the same motion.
 ///
 /// No panel is ever a modal `showModalBottomSheet` — a modal sheet
 /// would cover the editor, so the person couldn't see what they're
 /// formatting while picking it. Instead every panel (including the
-/// font picker and the new text-color panel) expands *above* this
+/// font picker and the text-color panels) expands *above* this
 /// toolbar, like a tab bar's content area, sized to the keyboard's own
 /// height so it visually "replaces" the keyboard rather than adding
-/// extra space on top of it. Tapping the editor area above dismisses
-/// whichever panel is open (the parent form page calls
-/// [DiaryBottomToolbarState.closeActivePanel] via a `GlobalKey` from a
-/// `GestureDetector` wrapping the editor), giving inline panels the
-/// same "tap outside to dismiss" feel a modal sheet would have had.
+/// extra space on top of it.
 class DiaryBottomToolbar extends StatefulWidget {
   final quill.QuillController controller;
   final FocusNode editorFocusNode;
@@ -66,10 +78,34 @@ class DiaryBottomToolbar extends StatefulWidget {
   /// entry, not just the Quill description this toolbar sits under.
   final ValueChanged<String> onAlignmentChanged;
 
+  /// Fired whenever Bold/Italic/Underline are toggled from the T
+  /// panel. Same "whole entry" reasoning as [onAlignmentChanged] — the
+  /// title field can't carry a Quill attribute of its own, so the
+  /// parent form page mirrors these onto the title's `TextStyle` in
+  /// addition to whatever this toolbar already applied to the Quill
+  /// description.
+  final ValueChanged<bool> onBoldChanged;
+  final ValueChanged<bool> onItalicChanged;
+  final ValueChanged<bool> onUnderlineChanged;
+
+  /// Fired when a font size is picked in the T panel. `null` means
+  /// "Normal" (clear back to default). Value is a numeric point-size
+  /// string (see `_fontSizeOptions`) — the parent parses it to a
+  /// `double` for the title's `TextStyle.fontSize`.
+  final ValueChanged<String?> onFontSizeChanged;
+
+  /// Fired when a color is picked (or cleared, passing `null`) in the
+  /// dedicated "Text color" panel. Value is a `#RRGGBB` hex string.
+  final ValueChanged<String?> onTextColorChanged;
+
   final VoidCallback onBackgroundPressed;
   final VoidCallback onStickerPressed;
   final VoidCallback onOverlayImagePressed;
   final VoidCallback onInlineImagePressed;
+
+  /// Called whenever the inline panel height changes (0 when closed).
+  /// The parent can use this to adjust bottom padding of the scroll view.
+  final ValueChanged<double>? onPanelHeightChanged;
 
   const DiaryBottomToolbar({
     super.key,
@@ -78,10 +114,16 @@ class DiaryBottomToolbar extends StatefulWidget {
     required this.selectedFontFamily,
     required this.onFontSelected,
     required this.onAlignmentChanged,
+    required this.onBoldChanged,
+    required this.onItalicChanged,
+    required this.onUnderlineChanged,
+    required this.onFontSizeChanged,
+    required this.onTextColorChanged,
     required this.onBackgroundPressed,
     required this.onStickerPressed,
     required this.onOverlayImagePressed,
     required this.onInlineImagePressed,
+    this.onPanelHeightChanged,
   });
 
   @override
@@ -120,7 +162,6 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
-    widget.editorFocusNode.addListener(_onFocusChanged);
   }
 
   @override
@@ -130,16 +171,11 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
     }
-    if (oldWidget.editorFocusNode != widget.editorFocusNode) {
-      oldWidget.editorFocusNode.removeListener(_onFocusChanged);
-      widget.editorFocusNode.addListener(_onFocusChanged);
-    }
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
-    widget.editorFocusNode.removeListener(_onFocusChanged);
     super.dispose();
   }
 
@@ -164,52 +200,31 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       if (hasSelection) {
         widget.editorFocusNode.unfocus();
       }
-      // Only swap which row shows (common vs selection tools) — do NOT
-      // close whatever panel is open. A panel should only ever close
-      // because the user explicitly closes it (tapping its own button
-      // again) or because the keyboard comes back (see
-      // `_onFocusChanged` below), not as a side effect of the
-      // selection collapsing/expanding, which can happen for reasons
-      // unrelated to the person wanting the panel gone (e.g. Quill's
-      // own internal bookkeeping around a formatting action).
       setState(() => _lastHadSelection = hasSelection);
     }
   }
 
-  /// The editor regaining focus USUALLY means the on-screen keyboard is
-  /// (re)appearing (e.g. the user tapped back into the text). But
-  /// `QuillController.formatText`/`formatSelection` can also silently
-  /// re-focus the editor's own FocusNode internally as part of applying
-  /// a format — even while a panel is open and the real on-screen
-  /// keyboard is nowhere in sight — which was incorrectly closing the
-  /// panel on every Bold/Alignment/etc. tap. Checking
-  /// `viewInsets.bottom` alongside `hasFocus` distinguishes "the
-  /// keyboard is genuinely up" from "the controller/editor's internal
-  /// focus bookkeeping fired" — only the former should close a panel.
-  void _onFocusChanged() {
-    if (!widget.editorFocusNode.hasFocus || _activePanel == _ActivePanel.none) {
-      return;
-    }
-    // Defer to the next frame: `viewInsets.bottom` at the exact instant
-    // focus changes can still reflect the PREVIOUS frame's keyboard
-    // state (e.g. still 0 right as a genuine keyboard-driven focus
-    // event fires, before the keyboard has animated in) — checking a
-    // frame later reads the settled value instead of a transient one.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!widget.editorFocusNode.hasFocus || _activePanel == _ActivePanel.none) {
-        return;
-      }
-      final keyboardIsVisible = MediaQuery.of(context).viewInsets.bottom > 100;
-      if (keyboardIsVisible) {
-        setState(() => _activePanel = _ActivePanel.none);
-      }
-    });
+  void _notifyPanelHeightChanged() {
+    final height = _activePanel == _ActivePanel.none ? 0.0 : _panelHeight;
+    widget.onPanelHeightChanged?.call(height);
   }
 
   /// Opens [panel], or closes it if it's already the one open
   /// (toggle). Always closes the keyboard first when opening, since
   /// keyboard and panel never show at the same time.
+  ///
+  /// Unlike the previous implementation, closing is now NEVER driven
+  /// by reacting to focus/keyboard state after the fact (that
+  /// reactive, heuristic-based approach — guessing whether a focus
+  /// event was a genuine keyboard-driven one vs. Quill's internal
+  /// bookkeeping by checking `viewInsets.bottom` a frame later — is
+  /// exactly what caused the keyboard to flicker open/closed and,
+  /// worse, occasionally left both the panel and keyboard visible at
+  /// once). Every panel open/close now happens for one explicit,
+  /// synchronous reason: a toolbar button was tapped, or the person
+  /// tapped away from the toolbar (see [closeActivePanel] /
+  /// [closeActivePanelAndRestoreFocus]). There is no listener that can
+  /// second-guess that and reopen/reclose things on its own.
   void _openPanel(_ActivePanel panel) {
     final opening = _activePanel != panel;
     if (opening) {
@@ -219,27 +234,81 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       if (currentInset > 100) {
         _lastKnownKeyboardHeight = currentInset;
       }
-      // Closing the keyboard is what actually removes the on-screen
-      // keyboard — losing focus on the Quill editor. This alone would
-      // normally re-trigger `_onFocusChanged`, but that listener only
-      // acts when focus is GAINED, not lost, so no feedback loop here.
       widget.editorFocusNode.unfocus();
+      // Some `flutter_quill` formatting methods may refocus the editor
+      // in a post-frame callback, so we schedule another unfocus to
+      // catch it.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _activePanel != _ActivePanel.none) {
+          widget.editorFocusNode.unfocus();
+        }
+      });
     }
     setState(() {
       _activePanel = opening ? panel : _ActivePanel.none;
     });
+    _notifyPanelHeightChanged();
   }
 
   /// Closes whatever panel is currently open, if any — used before
   /// performing an action that doesn't itself open a panel (Quote,
-  /// Divider) so a stale panel doesn't linger on screen once the
-  /// editor content has changed underneath it, and used by the
-  /// "tap the editor to dismiss" gesture the parent form page wires up
-  /// via [DiaryBottomToolbarState.closeActivePanel].
+  /// Divider), and by [closeActivePanelAndRestoreFocus] below. Does
+  /// NOT touch focus — callers that also want the keyboard to
+  /// reappear should use [closeActivePanelAndRestoreFocus] instead.
   void closeActivePanel() {
     if (_activePanel != _ActivePanel.none) {
       setState(() => _activePanel = _ActivePanel.none);
+      _notifyPanelHeightChanged();
     }
+  }
+
+  /// Closes whatever panel is open AND brings the keyboard back by
+  /// refocusing the description editor — this is what "tap outside the
+  /// sheet" wires up to (via the parent form page's `GestureDetector`s
+  /// over the editor area and any other non-toolbar part of the
+  /// screen), so tapping away from an open panel both dismisses it and
+  /// restores the keyboard in one motion, exactly like tapping outside
+  /// a modal bottom sheet would, instead of leaving the person looking
+  /// at neither.
+  void closeActivePanelAndRestoreFocus() {
+    final wasOpen = _activePanel != _ActivePanel.none;
+    if (!wasOpen) return;
+    setState(() => _activePanel = _ActivePanel.none);
+    _notifyPanelHeightChanged();
+    // Deferred one frame so the panel has actually collapsed out of
+    // the layout before the keyboard starts animating in — requesting
+    // focus in the very same frame the panel closes can make the two
+    // animations visually fight each other.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.editorFocusNode.requestFocus();
+    });
+  }
+
+  /// Called by every formatting action inside the open panels (T panel
+  /// bold/italic/underline/alignment/font-size, the text-color panels)
+  /// immediately after applying a Quill format. `QuillController.
+  /// formatText`/`formatSelection` can, in some flutter_quill versions,
+  /// silently reclaim focus on the editor's own `FocusNode` as a side
+  /// effect of applying a format — even though the person never tapped
+  /// back into the text and the panel is still meant to be open. Left
+  /// unchecked, that stray refocus is exactly what made "changing
+  /// alignment" (or any other panel action) pop the keyboard back up
+  /// over the still-open panel. Re-asserting `unfocus()` synchronously
+  /// as well as on the next frame closes that gap before it can ever
+  /// paint.
+  void _reassertUnfocus() {
+    if (widget.editorFocusNode.hasFocus) {
+      widget.editorFocusNode.unfocus();
+    }
+    // Also schedule a post-frame unfocus to catch any delayed focus
+    // that might be scheduled by Quill's internal handlers.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _activePanel != _ActivePanel.none) {
+        if (widget.editorFocusNode.hasFocus) {
+          widget.editorFocusNode.unfocus();
+        }
+      }
+    });
   }
 
   void _openSelectionColorPanel({required bool isHighlight}) {
@@ -257,10 +326,17 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       _lastKnownKeyboardHeight = currentInset;
     }
     widget.editorFocusNode.unfocus();
+    // Schedule a post-frame unfocus to catch stray refocus.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _activePanel != _ActivePanel.none) {
+        widget.editorFocusNode.unfocus();
+      }
+    });
     setState(() {
       _selectionColorIsHighlight = isHighlight;
       _activePanel = _ActivePanel.selectionColor;
     });
+    _notifyPanelHeightChanged();
   }
 
   /// Height used for whichever panel is currently open: the keyboard's
@@ -278,57 +354,91 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     final theme = Theme.of(context);
     final hasSelection = !widget.controller.selection.isCollapsed;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Inline panel area — sits ABOVE the toolbar row, like a tab
-        // bar's content pane, rather than as a modal overlay on top of
-        // the editor. AnimatedSize smooths the height change as panels
-        // open/close/swap instead of an abrupt jump.
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          alignment: Alignment.bottomCenter,
-          child: _activePanel == _ActivePanel.none
-              ? const SizedBox(width: double.infinity, height: 0)
-              : SizedBox(
-                  height: _panelHeight,
-                  child: _buildActivePanel(context),
-                ),
-        ),
-        Container(
-          height: _barHeight,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            border: Border(
-              top: BorderSide(color: theme.colorScheme.outlineVariant),
+    // The whole toolbar — panel + button row — reads as one continuous
+    // elevated card floating above the editor: rounded at the top and
+    // lifted with a soft shadow, rather than a flat bar pinned on with
+    // a hard 1px border. This also means the panel and the row beneath
+    // it never look like two separately-bolted-on pieces, whatever
+    // combination is currently showing.
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(ThemeRadii.xxl),
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.shadow.withValues(alpha: 0.10),
+              blurRadius: 20,
+              offset: const Offset(0, -6),
             ),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 120),
-            child: hasSelection
-                ? _SelectionToolsRow(
-                    key: const ValueKey('selection'),
-                    controller: widget.controller,
-                    activePanel: _activePanel,
-                    onOpenColorPanel: _openSelectionColorPanel,
-                  )
-                : _CommonToolsRow(
-                    key: const ValueKey('common'),
-                    controller: widget.controller,
-                    activePanel: _activePanel,
-                    onOpenPanel: _openPanel,
-                    onClosePanel: closeActivePanel,
-                    onBackgroundPressed: widget.onBackgroundPressed,
-                    onStickerPressed: widget.onStickerPressed,
-                    onOverlayImagePressed: widget.onOverlayImagePressed,
-                    onInlineImagePressed: widget.onInlineImagePressed,
-                  ),
-          ),
+          ],
         ),
-      ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Inline panel area — sits ABOVE the toolbar row, like a tab
+            // bar's content pane, rather than as a modal overlay on top of
+            // the editor. AnimatedSize smooths the height change as panels
+            // open/close/swap instead of an abrupt jump.
+            AnimatedSize(
+              duration: ThemeDurations.standard,
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.bottomCenter,
+              child: _activePanel == _ActivePanel.none
+                  ? const SizedBox(width: double.infinity, height: 0)
+                  : Container(
+                      height: _panelHeight,
+                      color: theme.colorScheme.surfaceContainerLow,
+                      child: Column(
+                        children: [
+                          const _PanelGrabber(),
+                          Expanded(child: _buildActivePanel(context)),
+                        ],
+                      ),
+                    ),
+            ),
+            Container(
+              height: _barHeight,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+               
+              ),
+            
+              child: 
+              
+              AnimatedSwitcher(
+                duration: ThemeDurations.fast,
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: hasSelection
+                    ? _SelectionToolsRow(
+                        key: const ValueKey('selection'),
+                        controller: widget.controller,
+                        activePanel: _activePanel,
+                        onOpenColorPanel: _openSelectionColorPanel,
+                      )
+                    : _CommonToolsRow(
+                        key: const ValueKey('common'),
+                        controller: widget.controller,
+                        activePanel: _activePanel,
+                        onOpenPanel: _openPanel,
+                        onClosePanel: closeActivePanel,
+                        onAfterFormat: _reassertUnfocus,
+                        onBackgroundPressed: widget.onBackgroundPressed,
+                        onStickerPressed: widget.onStickerPressed,
+                        onOverlayImagePressed: widget.onOverlayImagePressed,
+                        onInlineImagePressed: widget.onInlineImagePressed,
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+  
 
   Widget _buildActivePanel(BuildContext context) {
     switch (_activePanel) {
@@ -336,6 +446,11 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
         return _TextFormatPanel(
           controller: widget.controller,
           onAlignmentChanged: widget.onAlignmentChanged,
+          onBoldChanged: widget.onBoldChanged,
+          onItalicChanged: widget.onItalicChanged,
+          onUnderlineChanged: widget.onUnderlineChanged,
+          onFontSizeChanged: widget.onFontSizeChanged,
+          onAfterFormat: _reassertUnfocus,
         );
       case _ActivePanel.list:
         return _ListPanel(
@@ -346,14 +461,20 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
         return FontPicker(
           selectedFontFamily: widget.selectedFontFamily,
           onFontSelected: widget.onFontSelected,
+          onAfterFormat: _reassertUnfocus,
         );
       case _ActivePanel.textColor:
-        return _DocumentColorPanel(controller: widget.controller);
+        return _DocumentColorPanel(
+          controller: widget.controller,
+          onTextColorChanged: widget.onTextColorChanged,
+          onAfterFormat: _reassertUnfocus,
+        );
       case _ActivePanel.selectionColor:
         return _FontColorPanel(
           controller: widget.controller,
           isHighlight: _selectionColorIsHighlight,
           onDone: () => _openPanel(_ActivePanel.selectionColor),
+          onAfterFormat: _reassertUnfocus,
         );
       case _ActivePanel.none:
         return const SizedBox.shrink();
@@ -391,17 +512,19 @@ class _ToolbarIconButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(ThemeRadii.sm),
         onTap: onPressed,
-        child: Container(
+        child: AnimatedContainer(
+          duration: ThemeDurations.fast,
+          curve: Curves.easeOut,
           width: 40,
           height: 40,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: isActive
                 ? theme.colorScheme.primary.withValues(alpha: 0.14)
-                : null,
-            borderRadius: BorderRadius.circular(8),
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(ThemeRadii.sm),
           ),
           child: icon != null
               ? Icon(icon, size: 22, color: color)
@@ -426,8 +549,32 @@ class _ToolbarDivider extends StatelessWidget {
     return Container(
       width: 1,
       height: 24,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      color: Theme.of(context).colorScheme.outlineVariant,
+      margin: const EdgeInsets.symmetric(horizontal: ThemeSpacing.xs),
+      color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
+    );
+  }
+}
+
+/// Small centered grabber shown at the top of whichever panel is open,
+/// matching the drag-handle affordance every other bottom sheet in the
+/// app already uses (e.g. `DiaryFormOverlaySettingsSheet`) — a quiet
+/// visual cue that this is a dismissible sheet-like surface, not a
+/// fixed part of the toolbar.
+class _PanelGrabber extends StatelessWidget {
+  const _PanelGrabber();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: ThemeSpacing.sm, bottom: ThemeSpacing.xs),
+      child: Container(
+        width: 36,
+        height: 4,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(2),
+        ),
+      ),
     );
   }
 }
@@ -443,7 +590,12 @@ class _PanelSectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      padding: const EdgeInsets.fromLTRB(
+        ThemeSpacing.lg,
+        ThemeSpacing.md,
+        ThemeSpacing.lg,
+        ThemeSpacing.xs,
+      ),
       child: Text(
         label,
         style: theme.textTheme.labelMedium?.copyWith(
@@ -479,6 +631,7 @@ class _CommonToolsRow extends StatefulWidget {
   final _ActivePanel activePanel;
   final ValueChanged<_ActivePanel> onOpenPanel;
   final VoidCallback onClosePanel;
+  final VoidCallback onAfterFormat;
   final VoidCallback onBackgroundPressed;
   final VoidCallback onStickerPressed;
   final VoidCallback onOverlayImagePressed;
@@ -490,6 +643,7 @@ class _CommonToolsRow extends StatefulWidget {
     required this.activePanel,
     required this.onOpenPanel,
     required this.onClosePanel,
+    required this.onAfterFormat,
     required this.onBackgroundPressed,
     required this.onStickerPressed,
     required this.onOverlayImagePressed,
@@ -524,11 +678,6 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
   }
 
   void _insertDivider() {
-    // Quote/Divider both act immediately on the document rather than
-    // opening a panel of their own — but a DIFFERENT panel (T, Bullet,
-    // Font, Text color) might already be open from a previous tap.
-    // Close it first so the toolbar doesn't end up showing a stale
-    // panel above content that's just changed underneath it.
     widget.onClosePanel();
     final index = widget.controller.selection.baseOffset.clamp(
       0,
@@ -543,8 +692,6 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
   }
 
   void _toggleQuote() {
-    // Same reasoning as `_insertDivider` — close any open panel before
-    // toggling the block quote.
     widget.onClosePanel();
     final isActive = _isBlockActive(quill.Attribute.blockQuote);
     widget.controller.formatSelection(
@@ -552,6 +699,16 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
           ? quill.Attribute.clone(quill.Attribute.blockQuote, null)
           : quill.Attribute.blockQuote,
     );
+  }
+
+  void _undo() {
+    widget.controller.undo();
+    widget.onAfterFormat();
+  }
+
+  void _redo() {
+    widget.controller.redo();
+    widget.onAfterFormat();
   }
 
   bool get _isAnyListActive =>
@@ -588,23 +745,14 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
           _ToolbarIconButton(
             icon: Icons.undo_rounded,
             tooltip: 'Undo',
-            onPressed: widget.controller.hasUndo
-                ? widget.controller.undo
-                : null,
+            onPressed: widget.controller.hasUndo ? _undo : null,
           ),
           _ToolbarIconButton(
             icon: Icons.redo_rounded,
             tooltip: 'Redo',
-            onPressed: widget.controller.hasRedo
-                ? widget.controller.redo
-                : null,
+            onPressed: widget.controller.hasRedo ? _redo : null,
           ),
           const _ToolbarDivider(),
-          // T — opens the text-formatting panel: alignment, font size,
-          // bold, italic, underline. Nothing else lives here anymore —
-          // headings and both color sections have their own entry
-          // points (colors moved to the dedicated "Text color" button
-          // below; there's no headings button in this redesign).
           _ToolbarIconButton(
             textLabel: 'T',
             tooltip: 'Text formatting',
@@ -612,16 +760,12 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
                 _isAnyTextFormatActive,
             onPressed: () => widget.onOpenPanel(_ActivePanel.textFormat),
           ),
-          // Aa — font family picker, an inline panel like T/Bullet.
           _ToolbarIconButton(
             textLabel: 'Aa',
             tooltip: 'Font',
             isActive: widget.activePanel == _ActivePanel.font,
             onPressed: () => widget.onOpenPanel(_ActivePanel.font),
           ),
-          // Text color — its own dedicated toolbar item (previously
-          // buried inside the T panel). Applies to the whole document,
-          // since this button only appears in the no-selection row.
           _ToolbarIconButton(
             icon: Icons.format_color_text_rounded,
             tooltip: 'Text color',
@@ -629,8 +773,6 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
                 _hasDocumentTextColor,
             onPressed: () => widget.onOpenPanel(_ActivePanel.textColor),
           ),
-          // Bullet — opens the list panel (bullet / numbered /
-          // checklist) above this toolbar.
           _ToolbarIconButton(
             icon: Icons.format_list_bulleted_rounded,
             tooltip: 'Lists',
@@ -678,19 +820,9 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
 
 // ---------------------------------------------------------------------------
 // Text-format panel (opened by "T") — Alignment / Font size / Bold / Italic
-// / Underline ONLY. Headings and colors have both been removed from this
-// sheet: headings had no home elsewhere in this redesign's requirements and
-// are dropped; colors now live in the dedicated "Text color" toolbar button
-// (see `_DocumentColorPanel`) and the selection row's existing color panel.
+// / Underline ONLY.
 // ---------------------------------------------------------------------------
 
-/// Font sizes offered in the T panel. `flutter_quill`'s `SizeAttribute`
-/// takes a numeric point-size string (e.g. `'20'`), NOT the
-/// `small`/`large`/`huge` CSS-class keywords from Quill.js on the web —
-/// those keywords are a different (web-only) attributor convention and
-/// aren't what this package's own editor/toolbar renders by default.
-/// "Normal" clears the attribute back to the document's base font size
-/// rather than setting an explicit value.
 const List<({String label, String? value})> _fontSizeOptions = [
   (label: 'S', value: '12'),
   (label: 'M', value: null), // Normal / default
@@ -701,10 +833,20 @@ const List<({String label, String? value})> _fontSizeOptions = [
 class _TextFormatPanel extends StatefulWidget {
   final quill.QuillController controller;
   final ValueChanged<String> onAlignmentChanged;
+  final ValueChanged<bool> onBoldChanged;
+  final ValueChanged<bool> onItalicChanged;
+  final ValueChanged<bool> onUnderlineChanged;
+  final ValueChanged<String?> onFontSizeChanged;
+  final VoidCallback onAfterFormat;
 
   const _TextFormatPanel({
     required this.controller,
     required this.onAlignmentChanged,
+    required this.onBoldChanged,
+    required this.onItalicChanged,
+    required this.onUnderlineChanged,
+    required this.onFontSizeChanged,
+    required this.onAfterFormat,
   });
 
   @override
@@ -743,12 +885,8 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
     } else {
       widget.controller.formatSelection(alignment);
     }
-    // Alignment applies to the whole entry, not just this Quill
-    // description — the title field is plain text, so it can't carry
-    // a Quill attribute. The parent form page listens for this and
-    // both dispatches `DiaryFormAlignmentChanged` to the bloc and
-    // applies the resulting `TextAlign` to the title's `TextField`.
     widget.onAlignmentChanged(value);
+    widget.onAfterFormat();
   }
 
   String? get _currentFontSize {
@@ -761,42 +899,44 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
     return style.attributes.containsKey(attribute.key);
   }
 
-  /// Toggles [attribute] across the WHOLE document, not just from the
-  /// cursor onward. With a collapsed cursor (always the case here,
-  /// since this panel only shows when nothing is selected),
-  /// `formatSelection` only affects text typed AFTER this point — it
-  /// never touches text that already exists, which is why Bold/Italic/
-  /// Underline would otherwise appear to do nothing.
   void _toggle(quill.Attribute attribute) {
     final isActive = _isActive(attribute);
     final length = widget.controller.document.length;
-    if (length == 0) return;
-    widget.controller.formatText(
-      0,
-      length,
-      isActive ? quill.Attribute.clone(attribute, null) : attribute,
-    );
+    final nowActive = !isActive;
+    if (length > 0) {
+      widget.controller.formatText(
+        0,
+        length,
+        isActive ? quill.Attribute.clone(attribute, null) : attribute,
+      );
+    }
+    if (attribute.key == quill.Attribute.bold.key) {
+      widget.onBoldChanged(nowActive);
+    } else if (attribute.key == quill.Attribute.italic.key) {
+      widget.onItalicChanged(nowActive);
+    } else if (attribute.key == quill.Attribute.underline.key) {
+      widget.onUnderlineChanged(nowActive);
+    }
+    widget.onAfterFormat();
   }
 
-  /// Applies [value] (a numeric point-size string, or `null` to clear
-  /// back to the default size) across the WHOLE document — same
-  /// collapsed-cursor reasoning as `_toggle` above: this panel only
-  /// shows with nothing selected, so `formatSelection` alone would
-  /// only affect text typed from here on, not what's already written.
   void _applyFontSizeToWholeDocument(String? value) {
     final length = widget.controller.document.length;
-    if (length == 0) return;
-    widget.controller.formatText(
-      0,
-      length,
-      value == null
-          ? quill.Attribute.clone(quill.Attribute.size, null)
-          : quill.Attribute(
-              quill.Attribute.size.key,
-              quill.AttributeScope.inline,
-              value,
-            ),
-    );
+    if (length > 0) {
+      widget.controller.formatText(
+        0,
+        length,
+        value == null
+            ? quill.Attribute.clone(quill.Attribute.size, null)
+            : quill.Attribute(
+                quill.Attribute.size.key,
+                quill.AttributeScope.inline,
+                value,
+              ),
+      );
+    }
+    widget.onFontSizeChanged(value);
+    widget.onAfterFormat();
   }
 
   @override
@@ -879,24 +1019,81 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
 }
 
 // ---------------------------------------------------------------------------
-// Text color panel (opened by the new dedicated "Text color" toolbar
-// button) — applies to the WHOLE document, same scoping rule the old
-// in-T-panel color sections used, since this button only ever appears
-// in the no-selection common row. Swatches are sourced from
-// `AppColors.forRole(AppColorRole.text, ...)` rather than a hardcoded
-// hex list, per the app's single-source-of-truth palette rule.
+// Text color panel - applies to the WHOLE document
 // ---------------------------------------------------------------------------
+
+const List<(AppColorRole role, String label)> _colorRoleOptions = [
+  (AppColorRole.text, 'Text'),
+  (AppColorRole.primary, 'Primary'),
+  (AppColorRole.secondary, 'Secondary'),
+  (AppColorRole.surface, 'Surface'),
+  (AppColorRole.background, 'Background'),
+];
+
+class _ColorRoleSelector extends StatelessWidget {
+  final AppColorRole selectedRole;
+  final ValueChanged<AppColorRole> onRoleChanged;
+
+  const _ColorRoleSelector({
+    required this.selectedRole,
+    required this.onRoleChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final option in _colorRoleOptions)
+            Padding(
+              padding: const EdgeInsets.only(right: ThemeSpacing.sm),
+              child: ChoiceChip(
+                label: Text(option.$2),
+                selected: selectedRole == option.$1,
+                onSelected: (_) => onRoleChanged(option.$1),
+                labelStyle: theme.textTheme.labelMedium?.copyWith(
+                  color: selectedRole == option.$1
+                      ? theme.colorScheme.onPrimary
+                      : theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(ThemeRadii.sm),
+                  side: BorderSide(
+                    color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+                  ),
+                ),
+                selectedColor: theme.colorScheme.primary,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                side: BorderSide.none,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _DocumentColorPanel extends StatefulWidget {
   final quill.QuillController controller;
+  final ValueChanged<String?> onTextColorChanged;
+  final VoidCallback onAfterFormat;
 
-  const _DocumentColorPanel({required this.controller});
+  const _DocumentColorPanel({
+    required this.controller,
+    required this.onTextColorChanged,
+    required this.onAfterFormat,
+  });
 
   @override
   State<_DocumentColorPanel> createState() => _DocumentColorPanelState();
 }
 
 class _DocumentColorPanelState extends State<_DocumentColorPanel> {
+  AppColorRole _selectedRole = AppColorRole.text;
+
   @override
   void initState() {
     super.initState();
@@ -915,26 +1112,31 @@ class _DocumentColorPanelState extends State<_DocumentColorPanel> {
 
   void _applyToWholeDocument(String hex) {
     final length = widget.controller.document.length;
-    if (length == 0) return;
-    widget.controller.formatText(0, length, quill.ColorAttribute(hex));
+    if (length > 0) {
+      widget.controller.formatText(0, length, quill.ColorAttribute(hex));
+    }
+    widget.onTextColorChanged(hex);
+    widget.onAfterFormat();
   }
 
   void _clearFromWholeDocument() {
     final length = widget.controller.document.length;
-    if (length == 0) return;
-    widget.controller.formatText(
-      0,
-      length,
-      quill.Attribute.clone(quill.Attribute.color, null),
-    );
+    if (length > 0) {
+      widget.controller.formatText(
+        0,
+        length,
+        quill.Attribute.clone(quill.Attribute.color, null),
+      );
+    }
+    widget.onTextColorChanged(null);
+    widget.onAfterFormat();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final swatches =
-        AppColors.forRole(AppColorRole.text, isDark: isDark);
+    final swatches = AppColors.forRole(_selectedRole, isDark: isDark);
 
     return SafeArea(
       top: false,
@@ -944,6 +1146,11 @@ class _DocumentColorPanelState extends State<_DocumentColorPanel> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Text color', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 10),
+            _ColorRoleSelector(
+              selectedRole: _selectedRole,
+              onRoleChanged: (role) => setState(() => _selectedRole = role),
+            ),
             const SizedBox(height: 12),
             Expanded(
               child: SingleChildScrollView(
@@ -968,12 +1175,6 @@ class _DocumentColorPanelState extends State<_DocumentColorPanel> {
   }
 }
 
-/// Converts an [RgbaColor] to the `#RRGGBB` hex string Quill's
-/// `ColorAttribute`/`BackgroundAttribute` expect. `RgbaColor` only
-/// exposes `.toColor()` (a Flutter `Color`), not a hex string directly,
-/// so this small helper bridges the two at the one place in the
-/// toolbar that needs it. Opacity is intentionally dropped — Quill's
-/// color attributes are opaque RGB hex only.
 String _toHex(RgbaColor rgbaColor) {
   final r = rgbaColor.red.clamp(0, 255).toRadixString(16).padLeft(2, '0');
   final g = rgbaColor.green.clamp(0, 255).toRadixString(16).padLeft(2, '0');
@@ -993,12 +1194,21 @@ class _RgbaColorSwatch extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 32,
-        height: 32,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
           color: color.toColor(),
           shape: BoxShape.circle,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.shadow.withValues(alpha: 0.12),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
       ),
     );
@@ -1016,12 +1226,15 @@ class _ClearColorSwatch extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 32,
-        height: 32,
+        width: 34,
+        height: 34,
         alignment: Alignment.center,
         decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
           shape: BoxShape.circle,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+          ),
         ),
         child: Icon(
           Icons.format_color_reset_rounded,
@@ -1034,18 +1247,11 @@ class _ClearColorSwatch extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// List panel (opened by the bullet button) — Bullet / Numbered / Checklist.
-// Selecting any style now closes the panel automatically afterward.
+// List panel (opened by the bullet button)
 // ---------------------------------------------------------------------------
 
 class _ListPanel extends StatefulWidget {
   final quill.QuillController controller;
-
-  /// Called right after a style is applied, so the parent can close
-  /// this panel — the list panel is a one-shot picker (per req #7:
-  /// "after the user selects a bullet style, automatically close the
-  /// bottom sheet"), unlike T/Font/Text-color which stay open for
-  /// multiple adjustments.
   final VoidCallback onStyleSelected;
 
   const _ListPanel({required this.controller, required this.onStyleSelected});
@@ -1087,38 +1293,97 @@ class _ListPanelState extends State<_ListPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return SafeArea(
       top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.format_list_bulleted_rounded),
-            title: const Text('Bullet list'),
-            trailing: _isActive(quill.Attribute.ul)
-                ? Icon(Icons.check_rounded, color: theme.colorScheme.primary)
-                : null,
-            onTap: () => _toggle(quill.Attribute.ul),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sm),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ListOptionRow(
+              icon: Icons.format_list_bulleted_rounded,
+              label: 'Bullet list',
+              isActive: _isActive(quill.Attribute.ul),
+              onTap: () => _toggle(quill.Attribute.ul),
+            ),
+            _ListOptionRow(
+              icon: Icons.format_list_numbered_rounded,
+              label: 'Numbered list',
+              isActive: _isActive(quill.Attribute.ol),
+              onTap: () => _toggle(quill.Attribute.ol),
+            ),
+            _ListOptionRow(
+              icon: Icons.checklist_rounded,
+              label: 'Checklist',
+              isActive: _isActive(quill.Attribute.unchecked) ||
+                  _isActive(quill.Attribute.checked),
+              onTap: () => _toggle(quill.Attribute.unchecked),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A single selectable row inside [_ListPanel] — a rounded, softly
+/// highlighted card when active rather than a flat, full-bleed
+/// [ListTile], matching the pill-shaped active state every other
+/// button in this toolbar uses.
+class _ListOptionRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _ListOptionRow({
+    required this.icon,
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color =
+        isActive ? theme.colorScheme.primary : theme.colorScheme.onSurface;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: ThemeSpacing.xs / 2),
+      child: Material(
+        color: isActive
+            ? theme.colorScheme.primary.withValues(alpha: 0.10)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(ThemeRadii.md),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(ThemeRadii.md),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: ThemeSpacing.md,
+              vertical: ThemeSpacing.md,
+            ),
+            child: Row(
+              children: [
+                Icon(icon, color: color, size: 22),
+                const SizedBox(width: ThemeSpacing.md),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: color,
+                      fontWeight:
+                          isActive ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (isActive)
+                  Icon(Icons.check_rounded, color: theme.colorScheme.primary),
+              ],
+            ),
           ),
-          ListTile(
-            leading: const Icon(Icons.format_list_numbered_rounded),
-            title: const Text('Numbered list'),
-            trailing: _isActive(quill.Attribute.ol)
-                ? Icon(Icons.check_rounded, color: theme.colorScheme.primary)
-                : null,
-            onTap: () => _toggle(quill.Attribute.ol),
-          ),
-          ListTile(
-            leading: const Icon(Icons.checklist_rounded),
-            title: const Text('Checklist'),
-            trailing: (_isActive(quill.Attribute.unchecked) ||
-                    _isActive(quill.Attribute.checked))
-                ? Icon(Icons.check_rounded, color: theme.colorScheme.primary)
-                : null,
-            onTap: () => _toggle(quill.Attribute.unchecked),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1215,28 +1480,12 @@ class _SelectionToolsRowState extends State<_SelectionToolsRow> {
             isActive: colorPanelOpen,
             onPressed: () => widget.onOpenColorPanel(isHighlight: true),
           ),
-          // The old trailing "Clear formatting" button has been
-          // removed entirely (req #9) — it was the last button in this
-          // row and didn't work reliably, and toggling each active
-          // style back off individually (via the style picker or these
-          // color buttons' own "clear" swatch) already covers the same
-          // need.
         ],
       ),
     );
   }
 }
 
-/// Small bottom sheet listing Bold/Italic/Underline/Strikethrough as
-/// checkable rows — the selection row's style-picker button. Each row
-/// toggles independently and applies immediately.
-///
-/// This one remains a real `showModalBottomSheet`, unlike every other
-/// panel in this file — it's reached only while text IS selected, and
-/// covering the editor briefly here doesn't lose the selection (Quill
-/// keeps the selection alive under a modal), so there's no "can't see
-/// what I'm formatting" problem the inline-panel approach exists to
-/// solve for T/Bullet/Font/Text-color/the-selection-color-panel.
 class _StylePickerSheet extends StatefulWidget {
   final quill.QuillController controller;
   final quill.Style initialStyle;
@@ -1330,42 +1579,47 @@ class _StyleRow extends StatelessWidget {
   }
 }
 
-/// Font color / highlight color panel for the SELECTION row — applies
-/// only to the actual text selection via `formatSelection`, unlike the
-/// common toolbar's dedicated "Text color" button (which applies
-/// document-wide, since no selection exists in that context). Sized to
-/// keyboard height by the parent, same as every other panel. Swatches
-/// are sourced from `AppColors` rather than a hardcoded hex list, same
-/// as `_DocumentColorPanel` — text color uses the text role for both;
-/// highlight reuses the same text-role palette since there's no
-/// dedicated "highlight" role in `AppColors`.
-class _FontColorPanel extends StatelessWidget {
+class _FontColorPanel extends StatefulWidget {
   final quill.QuillController controller;
   final bool isHighlight;
   final VoidCallback onDone;
+  final VoidCallback onAfterFormat;
 
   const _FontColorPanel({
     required this.controller,
     this.isHighlight = false,
     required this.onDone,
+    required this.onAfterFormat,
   });
 
+  @override
+  State<_FontColorPanel> createState() => _FontColorPanelState();
+}
+
+class _FontColorPanelState extends State<_FontColorPanel> {
+  AppColorRole _selectedRole = AppColorRole.text;
+
   void _apply(String hex) {
-    controller.formatSelection(
-      isHighlight ? quill.BackgroundAttribute(hex) : quill.ColorAttribute(hex),
+    widget.controller.formatSelection(
+      widget.isHighlight
+          ? quill.BackgroundAttribute(hex)
+          : quill.ColorAttribute(hex),
     );
+    widget.onAfterFormat();
   }
 
   void _clear() {
-    final attribute = isHighlight ? quill.Attribute.background : quill.Attribute.color;
-    controller.formatSelection(quill.Attribute.clone(attribute, null));
+    final attribute =
+        widget.isHighlight ? quill.Attribute.background : quill.Attribute.color;
+    widget.controller.formatSelection(quill.Attribute.clone(attribute, null));
+    widget.onAfterFormat();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final swatches = AppColors.forRole(AppColorRole.text, isDark: isDark);
+    final swatches = AppColors.forRole(_selectedRole, isDark: isDark);
 
     return SafeArea(
       top: false,
@@ -1378,12 +1632,18 @@ class _FontColorPanel extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  isHighlight ? 'Highlight color' : 'Text color',
+                  widget.isHighlight ? 'Highlight color' : 'Text color',
                   style: theme.textTheme.titleMedium,
                 ),
-                TextButton(onPressed: onDone, child: const Text('Done')),
+                TextButton(onPressed: widget.onDone, child: const Text('Done')),
               ],
             ),
+            const SizedBox(height: 10),
+            _ColorRoleSelector(
+              selectedRole: _selectedRole,
+              onRoleChanged: (role) => setState(() => _selectedRole = role),
+            ),
+            const SizedBox(height: 12),
             Expanded(
               child: SingleChildScrollView(
                 child: Wrap(
@@ -1411,19 +1671,6 @@ class _FontColorPanel extends StatelessWidget {
 // Divider embed
 // ---------------------------------------------------------------------------
 
-/// A single custom block embed representing a horizontal-rule divider
-/// line. Carries no data (`''`) since a divider has no configurable
-/// content.
-///
-/// REQUIRED WIRING: register [DividerEmbedBuilder] in
-/// `diary_form_page.dart`'s `_quillEditorConfig.embedBuilders` list:
-/// ```dart
-/// embedBuilders: [
-///   ResizableImageEmbedBuilder(),
-///   DividerEmbedBuilder(),
-///   ...FlutterQuillEmbeds.editorBuilders(),
-/// ],
-/// ```
 class DividerEmbed extends quill.CustomBlockEmbed {
   static const String dividerType = 'divider';
 

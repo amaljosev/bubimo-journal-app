@@ -21,6 +21,7 @@ import '../widgets/confirm_delete_dialog.dart';
 import '../widgets/overlay/overlay_image_view.dart';
 import '../widgets/overlay/resizable_image_embed_builder.dart';
 import '../widgets/overlay/sticker_overlay_view.dart';
+import '../widgets/diary_bottom_toolbar.dart' show DividerEmbedBuilder;
 
 /// Displays a single diary entry in full, with favorite toggle, edit,
 /// and delete actions.
@@ -67,6 +68,42 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
     super.dispose();
   }
 
+  /// Mirrors `_DiaryFormViewState._colorFromHex` in diary_form_page.dart.
+  Color? _colorFromHex(String hex) {
+    final cleaned = hex.replaceFirst('#', '');
+    final value = int.tryParse(cleaned, radix: 16);
+    if (value == null) return null;
+    return Color(0xFF000000 | value);
+  }
+
+  /// Mirrors `_DiaryFormViewState._textAlignFor` in diary_form_page.dart
+  /// — keeps wrapped title text aligned the same way the form did.
+  TextAlign _textAlignFor(String alignment) {
+    switch (alignment) {
+      case 'center':
+        return TextAlign.center;
+      case 'right':
+        return TextAlign.right;
+      case 'justify':
+        return TextAlign.justify;
+      default:
+        return TextAlign.left;
+    }
+  }
+
+  /// Positions the mood/title/date block as a whole — 'justify' has no
+  /// positional equivalent, so it falls back to start like 'left'.
+  CrossAxisAlignment _crossAxisFor(String alignment) {
+    switch (alignment) {
+      case 'center':
+        return CrossAxisAlignment.center;
+      case 'right':
+        return CrossAxisAlignment.end;
+      default:
+        return CrossAxisAlignment.start;
+    }
+  }
+
   Future<void> _loadEntry() async {
     setState(() {
       _isLoading = true;
@@ -96,7 +133,6 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
   }
 
   Future<void> _toggleFavorite() async {
-    // Guard against duplicate taps firing overlapping updates.
     if (_isTogglingFavorite || _entry == null) return;
 
     setState(() => _isTogglingFavorite = true);
@@ -222,9 +258,6 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
     );
 
     return Container(
-      // Same lightened overlay treatment as the form page, so text and
-      // embeds stay legible over busy background photos while the
-      // background itself is still clearly visible.
       decoration: backgroundImage != null
           ? BoxDecoration(
               image: DecorationImage(
@@ -242,29 +275,52 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
         child: Column(
           crossAxisAlignment: .start,
           children: [
-            // ── Fixed header: mood, title, date ──────────────────────
-            // Pulled out of the scroll region that holds the editor +
-            // sticker/overlay stack below, exactly like the form
-            // page's header/description split. Overlay item positions
-            // are stored relative to the editor's own bounds, not the
-            // page's — if this header shared a scroll view with the
-            // Stack (as it used to), the Stack's origin would sit
-            // however far down the header pushed it, offsetting every
-            // sticker/image from where it appears on the form page.
+            // Fixed header: mood, title, date — positioned as a block
+            // per the entry's alignment, with the title carrying the
+            // entry's whole-entry text style (bold/italic/underline/
+            // size/color), matching how the form's title field applies
+            // the same state fields — see `DiaryFormTitleField`.
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+              child: SizedBox(
+                width: double.infinity,
+                child: Column(
+                  crossAxisAlignment: _crossAxisFor(entry.alignment),
+                  children: [
                   if (entry.mood != null)
                     Text(
                       entry.mood!.emoji,
                       style: const TextStyle(fontSize: 32),
                     ),
                   const SizedBox(height: 8),
-                  Text(
-                    entry.title?.isNotEmpty == true ? entry.title! : 'Untitled',
-                    style: Theme.of(context).textTheme.headlineSmall,
+                  Builder(
+                    builder: (context) {
+                      final baseStyle =
+                          Theme.of(context).textTheme.headlineSmall;
+                      return Text(
+                        entry.title?.isNotEmpty == true
+                            ? entry.title!
+                            : 'Untitled',
+                        textAlign: _textAlignFor(entry.alignment),
+                        style: baseStyle?.copyWith(
+                          fontWeight: entry.isBold
+                              ? FontWeight.w900
+                              : baseStyle.fontWeight,
+                          fontStyle: entry.isItalic
+                              ? FontStyle.italic
+                              : FontStyle.normal,
+                          decoration: entry.isUnderline
+                              ? TextDecoration.underline
+                              : TextDecoration.none,
+                          fontSize: entry.fontSize != null
+                              ? double.tryParse(entry.fontSize!)
+                              : baseStyle.fontSize,
+                          color: entry.textColorHex != null
+                              ? _colorFromHex(entry.textColorHex!)
+                              : baseStyle.color,
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -272,15 +328,10 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
+                ),
               ),
             ),
-            // ── Description area: editor + sticker/overlay stack ────
-            // Padding here (20 horizontal, 12 top) intentionally
-            // matches the form page's `_editorBoundsKey` container
-            // exactly, since that box is the coordinate space overlay
-            // image/sticker positions are stored relative to. Matching
-            // it here means a sticker's saved (x, y) lands in the same
-            // spot on screen in both places.
+            // Description area: editor + sticker/overlay stack
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
@@ -294,6 +345,7 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                             config: quill.QuillEditorConfig(
                               embedBuilders: [
                                 ResizableImageEmbedBuilder(),
+                                DividerEmbedBuilder(), // 👈 Added divider builder
                                 ...FlutterQuillEmbeds.editorBuilders(),
                               ],
                             ),

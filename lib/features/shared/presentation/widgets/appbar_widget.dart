@@ -46,7 +46,7 @@ class _SettingsButtonState extends State<_SettingsButton> {
   Widget build(BuildContext context) {
     return IconButton(
       onPressed: () => _openSettings(context),
-      icon: const Icon(Icons.settings),
+      icon: const Icon(Icons.settings_outlined),
     );
   }
 }

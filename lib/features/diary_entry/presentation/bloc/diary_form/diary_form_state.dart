@@ -51,6 +51,27 @@ class DiaryFormState extends Equatable {
   /// when no alignment attribute is set.
   final String alignment;
 
+  /// Whole-entry text style fields — same "applies to both title and
+  /// description" rationale as [alignment] above. These mirror the T
+  /// panel's Bold/Italic/Underline/Font size and the dedicated "Text
+  /// color" panel: the toolbar applies them to the Quill description
+  /// directly via `formatText`, and additionally reports them here so
+  /// the plain-text title field (which can't carry a Quill attribute)
+  /// can apply the equivalent `TextStyle`.
+  final bool isBold;
+  final bool isItalic;
+  final bool isUnderline;
+
+  /// Numeric point-size string matching `flutter_quill`'s
+  /// `SizeAttribute` convention (e.g. `'20'`), or `null` for the
+  /// document's default size. Parsed to a `double` at the title-field
+  /// call site.
+  final String? fontSize;
+
+  /// `#RRGGBB` hex string picked from the "Text color" panel, or
+  /// `null` for the default color.
+  final String? textColorHex;
+
   /// Denormalized cache of gallery photo asset paths inserted into
   /// [content] via the rich editor's image picker. Kept in sync by
   /// [DiaryFormImageAdded] rather than re-parsed from the Delta JSON on
@@ -112,6 +133,11 @@ class DiaryFormState extends Equatable {
     this.mood,
     this.fontFamily,
     this.alignment = 'left',
+    this.isBold = false,
+    this.isItalic = false,
+    this.isUnderline = false,
+    this.fontSize,
+    this.textColorHex,
     this.images = const [],
     this.overlayImages = const [],
     this.stickers = const [],
@@ -145,6 +171,13 @@ class DiaryFormState extends Equatable {
     bool clearMood = false,
     String? fontFamily,
     String? alignment,
+    bool? isBold,
+    bool? isItalic,
+    bool? isUnderline,
+    String? fontSize,
+    bool clearFontSize = false,
+    String? textColorHex,
+    bool clearTextColor = false,
     List<String>? images,
     List<OverlayImage>? overlayImages,
     List<Sticker>? stickers,
@@ -170,6 +203,12 @@ class DiaryFormState extends Equatable {
       mood: clearMood ? null : (mood ?? this.mood),
       fontFamily: fontFamily ?? this.fontFamily,
       alignment: alignment ?? this.alignment,
+      isBold: isBold ?? this.isBold,
+      isItalic: isItalic ?? this.isItalic,
+      isUnderline: isUnderline ?? this.isUnderline,
+      fontSize: clearFontSize ? null : (fontSize ?? this.fontSize),
+      textColorHex:
+          clearTextColor ? null : (textColorHex ?? this.textColorHex),
       images: images ?? this.images,
       overlayImages: overlayImages ?? this.overlayImages,
       stickers: stickers ?? this.stickers,
@@ -204,6 +243,11 @@ class DiaryFormState extends Equatable {
         mood,
         fontFamily,
         alignment,
+        isBold,
+        isItalic,
+        isUnderline,
+        fontSize,
+        textColorHex,
         images,
         overlayImages,
         stickers,

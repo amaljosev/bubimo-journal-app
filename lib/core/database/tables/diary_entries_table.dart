@@ -58,6 +58,24 @@ class DiaryEntriesTable {
   static const String columnBgOverlayColor = 'bg_overlay_color';
   static const String columnWordCount = 'word_count';
   static const String columnFontFamily = 'font_family';
+
+  /// Whole-entry text style — see `DiaryEntry.alignment` etc. for the
+  /// full rationale (mirrors the form's T panel / Text color panel so
+  /// the plain-text title survives save/reload and shows correctly on
+  /// the view-only screen). `'left'`, `'center'`, `'right'`, or
+  /// `'justify'`.
+  static const String columnAlignment = 'alignment';
+  static const String columnIsBold = 'is_bold';
+  static const String columnIsItalic = 'is_italic';
+  static const String columnIsUnderline = 'is_underline';
+
+  /// Numeric point-size string (e.g. `'20'`), or `NULL` for the
+  /// document's default size.
+  static const String columnFontSize = 'font_size';
+
+  /// `#RRGGBB` hex string, or `NULL` for the default color.
+  static const String columnTextColorHex = 'text_color_hex';
+
   static const String columnIsFavorite = 'is_favorite';
   static const String columnIsDeleted = 'is_deleted';
   static const String columnDeletedAt = 'deleted_at';
@@ -85,6 +103,12 @@ class DiaryEntriesTable {
       $columnBgOverlayColor TEXT,
       $columnWordCount INTEGER NOT NULL DEFAULT 0,
       $columnFontFamily TEXT,
+      $columnAlignment TEXT NOT NULL DEFAULT 'left',
+      $columnIsBold INTEGER NOT NULL DEFAULT 0,
+      $columnIsItalic INTEGER NOT NULL DEFAULT 0,
+      $columnIsUnderline INTEGER NOT NULL DEFAULT 0,
+      $columnFontSize TEXT,
+      $columnTextColorHex TEXT,
       $columnIsFavorite INTEGER NOT NULL DEFAULT 0,
       $columnIsDeleted INTEGER NOT NULL DEFAULT 0,
       $columnDeletedAt TEXT,

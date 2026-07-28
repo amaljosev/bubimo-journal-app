@@ -98,10 +98,16 @@ class FontPicker extends StatefulWidget {
   final String? selectedFontFamily;
   final ValueChanged<String?> onFontSelected;
 
+  /// Optional callback called immediately after `onFontSelected` to
+  /// reassert unfocus on the editor, preventing the keyboard from
+  /// popping up while the panel is still open.
+  final VoidCallback? onAfterFormat;
+
   const FontPicker({
     super.key,
     required this.selectedFontFamily,
     required this.onFontSelected,
+    this.onAfterFormat,
   });
 
   @override
@@ -129,6 +135,8 @@ class _FontPickerState extends State<FontPicker> {
   void _handleFontTap(String? resolvedFamily) {
     _selectedFamily.value = resolvedFamily;
     widget.onFontSelected(resolvedFamily);
+    // Reassert unfocus after the format operation that may have refocused
+    widget.onAfterFormat?.call();
   }
 
   @override

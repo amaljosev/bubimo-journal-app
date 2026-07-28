@@ -120,6 +120,17 @@ class DiaryFormTitleField extends StatelessWidget {
   /// doesn't pass one.
   final TextAlign textAlign;
 
+  /// Mirrors the T panel's Bold/Italic/Underline toggles and the
+  /// "Text color" panel's pick — same whole-entry rationale as
+  /// [textAlign]. All default to the field's previous unconfigured
+  /// look (regular weight, no italic/underline, theme's default
+  /// color) so passing none of them changes nothing.
+  final bool isBold;
+  final bool isItalic;
+  final bool isUnderlined;
+  final double? fontSize;
+  final Color? textColor;
+
   const DiaryFormTitleField({
     super.key,
     required this.controller,
@@ -127,11 +138,21 @@ class DiaryFormTitleField extends StatelessWidget {
     required this.nextFocusNode,
     required this.onChanged,
     this.textAlign = TextAlign.start,
+    this.isBold = false,
+    this.isItalic = false,
+    this.isUnderlined = false,
+    this.fontSize,
+    this.textColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.headlineSmall?.copyWith(
+      fontWeight: FontWeight.w800,
+      color: theme.colorScheme.onSurface,
+    );
+
     return TextField(
       controller: controller,
       focusNode: focusNode,
@@ -141,9 +162,19 @@ class DiaryFormTitleField extends StatelessWidget {
       onTapOutside: (_) => focusNode.unfocus(),
       onSubmitted: (_) => nextFocusNode.requestFocus(),
       cursorColor: theme.colorScheme.primary,
-      style: theme.textTheme.headlineSmall?.copyWith(
-        fontWeight: FontWeight.w800,
-        color: theme.colorScheme.onSurface,
+      // `isBold`/`isItalic`/`isUnderlined` override the base w800
+      // weight/style rather than compounding with it — Bold here means
+      // "at least as bold as the title already was", so toggling it
+      // off falls back to the title's own w800 default rather than a
+      // plain w400, keeping the title from ever looking lighter than
+      // its normal look.
+      style: baseStyle?.copyWith(
+        fontWeight: isBold ? FontWeight.w900 : FontWeight.w800,
+        fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
+        decoration:
+            isUnderlined ? TextDecoration.underline : TextDecoration.none,
+        fontSize: fontSize ?? baseStyle.fontSize,
+        color: textColor ?? baseStyle.color,
       ),
       decoration: InputDecoration(
         hintText: 'Title',

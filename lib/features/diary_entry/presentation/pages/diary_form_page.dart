@@ -151,6 +151,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   // use it, which is exactly the crash this guards against.
   StreamSubscription<StickerPickerState>? _stickerDownloadSubscription;
 
+  // Tracks the inline panel height from the toolbar, so the scroll view
+  // can add extra bottom padding to prevent content from being hidden.
+  double _bottomPanelHeight = 0;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -240,7 +244,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   }
 
   Future<void> _pickDate(BuildContext context, DateTime current) async {
-    FocusManager.instance.primaryFocus?.unfocus();
+    // Dismiss keyboard before showing date picker
+    FocusScope.of(context).unfocus();
+    _toolbarKey.currentState?.closeActivePanel();
+
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -280,14 +287,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: () {
-                        // Use `this.context.mounted` — not the
-                        // `context` parameter's `mounted` — since it's
-                        // `this.context` that actually gets read below.
-                        // The two are normally the same element, but
-                        // checking the one you don't use and then
-                        // reading the other is a latent bug if that
-                        // ever stops being true (e.g. this method gets
-                        // reused with a different passed-in context).
                         if (this.context.mounted) {
                           this.context.read<DiaryFormBloc>().add(
                             DiaryFormDateChanged(picked),
@@ -327,10 +326,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       anchorKey: _moodAvatarKey,
       selectedMood: currentMood,
     );
-    // `result == null` means the popover was dismissed without a
-    // choice (barrier tap) — leave the mood untouched. A non-null
-    // result (even with `.mood == null`, meaning "cleared") should be
-    // applied.
     if (result != null && context.mounted) {
       context.read<DiaryFormBloc>().add(DiaryFormMoodChanged(result.mood));
     }
@@ -366,15 +361,15 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   /// `DiaryFormBloc` free of any network/IO concerns, matching how it
   /// never talks to Supabase directly for backgrounds either.
   Future<void> _openStickerPicker(BuildContext context) async {
+    // Dismiss keyboard before showing sticker picker
+    FocusScope.of(context).unfocus();
+    _toolbarKey.currentState?.closeActivePanel();
+
     final url = await showStickerPickerSheet(context);
     if (url == null || !context.mounted) return;
 
     final pickerBloc = getIt<StickerPickerBloc>();
     try {
-      // Show a lightweight blocking indicator while the sticker
-      // downloads — this is typically instant for cached stickers and
-      // brief even on first download, so a full loading screen would
-      // be overkill; a snackbar-free short wait keeps the flow simple.
       final localPath = await _downloadSticker(pickerBloc, url);
       if (localPath == null || !mounted) return;
 
@@ -425,10 +420,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       } else if (state.downloadError != null && !state.isDownloading) {
         _stickerDownloadSubscription?.cancel();
         _stickerDownloadSubscription = null;
-        // Guard immediately before touching `context`/`ScaffoldMessenger`
-        // — `mounted` must be the last check before use, not checked
-        // earlier and then relied on, since this callback can run at
-        // any point relative to this widget's lifecycle.
         if (mounted) {
           ScaffoldMessenger.of(
             context,
@@ -448,6 +439,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
 
   /// Picks a photo for inline insertion into the Quill document body.
   Future<void> _pickInlineImage() async {
+    // Dismiss keyboard before showing image picker
+    FocusScope.of(context).unfocus();
+    _toolbarKey.currentState?.closeActivePanel();
+
     try {
       final image = await ImagePicker().pickImage(source: ImageSource.gallery);
       if (image != null && mounted) {
@@ -464,6 +459,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
 
   /// Picks a photo for a free-floating overlay on top of the entry.
   Future<void> _pickOverlayImage() async {
+    // Dismiss keyboard before showing image picker
+    FocusScope.of(context).unfocus();
+    _toolbarKey.currentState?.closeActivePanel();
+
     try {
       final image = await ImagePicker().pickImage(source: ImageSource.gallery);
       if (image != null && mounted) {
@@ -501,21 +500,11 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   }
 
   void _onOverlayImageSelect(String id) {
-    // Selecting an overlay item only takes keyboard focus away from the
-    // Quill editor (dismissing the keyboard/cursor) — it deliberately
-    // does NOT touch scroll physics anywhere, so the description area
-    // keeps scrolling normally the whole time an item is selected.
     _descriptionFocusNode.unfocus();
     _bloc.add(DiaryFormOverlayImageSelected(id));
   }
 
   void _onOverlayImageDeselect() {
-    // Tapping the editor area (outside any overlay item) deselects
-    // whatever was selected. Text editing becomes active again
-    // naturally the next time the user taps into the text itself —
-    // this handler doesn't need to request focus, since the deselect
-    // gesture here is a generic "tap the description area" and Quill's
-    // own tap handling underneath already manages focus for text taps.
     if (_bloc.state.selectedOverlayImageId == null &&
         _bloc.state.selectedStickerId == null) {
       return;
@@ -547,8 +536,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   }
 
   void _onStickerSelect(String id) {
-    // See `_onOverlayImageSelect` — only unfocuses text editing,
-    // scrolling is never disabled.
     _descriptionFocusNode.unfocus();
     _bloc.add(DiaryFormStickerSelected(id));
   }
@@ -577,10 +564,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
 
   void _applyFontFamily(String? fontFamily) {
     final controller = _quillController!;
-    // Applies the chosen font across the whole document. This is a
-    // whole-entry font choice (stored on `DiaryEntry.fontFamily`), not
-    // per-selection rich-text formatting — matches the original
-    // requirement ("change the font" as an entry-level setting).
     controller.formatText(
       0,
       controller.document.length,
@@ -589,13 +572,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     _bloc.add(DiaryFormFontFamilyChanged(fontFamily));
   }
 
-  /// Converts `DiaryFormState.alignment` (`'left'`/`'center'`/
-  /// `'right'`/`'justify'`, matching Quill's own attribute values) into
-  /// Flutter's `TextAlign` for the title field. `'justify'` maps to
-  /// `TextAlign.justify` even though a single-line title rarely shows
-  /// any visible difference from `left` — kept 1:1 with the Quill side
-  /// rather than silently collapsing it to `left`, so the two fields
-  /// never visibly disagree if the title ever wraps to multiple lines.
   TextAlign _textAlignFor(String alignment) {
     switch (alignment) {
       case 'center':
@@ -610,16 +586,23 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     }
   }
 
-  /// Called from the T panel's alignment control. Applies the chosen
-  /// alignment to the title field (via bloc state → `TextAlign`, since
-  /// the title is a plain `TextField` and can't carry a Quill
-  /// attribute) in addition to whatever the Quill editor itself already
-  /// applied to the description directly.
+  Color? _colorFromHex(String? hex) {
+    if (hex == null) return null;
+    final cleaned = hex.replaceFirst('#', '');
+    final value = int.tryParse(cleaned, radix: 16);
+    if (value == null) return null;
+    return Color(0xFF000000 | value);
+  }
+
   void _onAlignmentChanged(String alignment) {
     _bloc.add(DiaryFormAlignmentChanged(alignment));
   }
 
   Future<void> _openBackgroundPicker(BuildContext context) async {
+    // Dismiss keyboard before showing background picker
+    FocusScope.of(context).unfocus();
+    _toolbarKey.currentState?.closeActivePanel();
+
     final selection = await showBackgroundPickerSheet(context);
     if (selection == null) return;
 
@@ -639,6 +622,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   /// opacity and color. Only meaningful when a background image is set,
   /// so the caller only shows the settings icon in that case.
   Future<void> _openOverlaySettingsSheet(BuildContext context) async {
+    // Dismiss keyboard before showing overlay settings
+    FocusScope.of(context).unfocus();
+    _toolbarKey.currentState?.closeActivePanel();
+
     final bloc = _bloc;
     await showModalBottomSheet<void>(
       context: context,
@@ -667,9 +654,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
           ).showSnackBar(SnackBar(content: Text(state.errorMessage!)));
         }
 
-        // Initialize the title controller and Quill controller exactly
-        // once, right after an existing entry finishes loading in edit
-        // mode (or immediately for a blank create form).
         if (state.status == DiaryFormStatus.ready && !_controllersSynced) {
           _titleController.text = state.title;
           _initQuillController(state.content);
@@ -682,9 +666,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         }
 
         if (state.status == DiaryFormStatus.failure && !_controllersSynced) {
-          // Only show a full-screen error if we failed to even load the
-          // entry (edit mode) — a save failure is shown as a snackbar
-          // instead, so the user doesn't lose unsaved input.
           return Scaffold(
             body: ErrorScreen(
               message: state.errorMessage ?? 'Something went wrong.',
@@ -696,8 +677,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         }
 
         if (_quillController == null) {
-          // Controllers not synced yet on this build — avoid rendering
-          // the editor with a null controller.
           return const Scaffold(body: LoadingScreen());
         }
 
@@ -707,8 +686,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
           bgLocalPath: state.bgLocalPath,
         );
 
-        // Save requires at least some content — either a title or a
-        // non-empty description — mirroring the reference app's rule.
         final canSave = state.title.trim().isNotEmpty || _hasDescriptionText;
 
         return Scaffold(
@@ -775,23 +752,40 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                     child: Column(
                       children: [
-                        DiaryFormHeaderRow(
-                          date: state.date,
-                          mood: state.mood,
-                          moodAvatarKey: _moodAvatarKey,
-                          onDateTap: () => _pickDate(context, state.date),
-                          onMoodTap: () =>
-                              _openMoodPopover(context, state.mood),
+                        Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: (_) => _toolbarKey.currentState
+                              ?.closeActivePanelAndRestoreFocus(),
+                          child: DiaryFormHeaderRow(
+                            date: state.date,
+                            mood: state.mood,
+                            moodAvatarKey: _moodAvatarKey,
+                            onDateTap: () => _pickDate(context, state.date),
+                            onMoodTap: () =>
+                                _openMoodPopover(context, state.mood),
+                          ),
                         ),
                         const SizedBox(height: 20),
-                        DiaryFormTitleField(
-                          controller: _titleController,
-                          focusNode: _titleFocusNode,
-                          nextFocusNode: _descriptionFocusNode,
-                          textAlign: _textAlignFor(state.alignment),
-                          onChanged: (value) => context
-                              .read<DiaryFormBloc>()
-                              .add(DiaryFormTitleChanged(value)),
+                        Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: (_) =>
+                              _toolbarKey.currentState?.closeActivePanel(),
+                          child: DiaryFormTitleField(
+                            controller: _titleController,
+                            focusNode: _titleFocusNode,
+                            nextFocusNode: _descriptionFocusNode,
+                            textAlign: _textAlignFor(state.alignment),
+                            isBold: state.isBold,
+                            isItalic: state.isItalic,
+                            isUnderlined: state.isUnderline,
+                            fontSize: state.fontSize != null
+                                ? double.tryParse(state.fontSize!)
+                                : null,
+                            textColor: _colorFromHex(state.textColorHex),
+                            onChanged: (value) => context
+                                .read<DiaryFormBloc>()
+                                .add(DiaryFormTitleChanged(value)),
+                          ),
                         ),
                         const SizedBox(height: 12),
                       ],
@@ -801,31 +795,21 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        return GestureDetector(
-                          // Closes any open toolbar panel (T, Font,
-                          // Text color, Bullet) the instant the editor
-                          // area itself is tapped — since those panels
-                          // are inline rather than modal sheets, this
-                          // is what stands in for "tap outside to
-                          // dismiss." `HitTestBehavior.translucent` lets
-                          // the tap still reach through to Quill's own
-                          // tap handling underneath (placing the
-                          // cursor, focusing the editor) and to
-                          // `OverlayLayer`'s own deselect handling —
-                          // this detector only observes the tap to
-                          // close the panel, it never consumes it.
+                        return Listener(
                           behavior: HitTestBehavior.translucent,
-                          onTap: () =>
-                              _toolbarKey.currentState?.closeActivePanel(),
+                          onPointerDown: (_) => _toolbarKey.currentState
+                              ?.closeActivePanelAndRestoreFocus(),
                           child: Container(
                             key: _editorBoundsKey,
                             width: constraints.maxWidth,
                             height: constraints.maxHeight,
-                            padding:
-                                const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                             child: SingleChildScrollView(
                               controller: _descriptionScrollController,
                               physics: const BouncingScrollPhysics(),
+                              padding: EdgeInsets.only(
+                                bottom: _bottomPanelHeight + 16, // Extra padding when panel is open
+                              ),
                               child: OverlayLayer(
                                 boundsKey: _editorBoundsKey,
                                 images: state.overlayImages,
@@ -843,17 +827,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                                   constraints: BoxConstraints(
                                     minHeight: constraints.maxHeight,
                                   ),
-                                  // A stable key (not tied to `state`,
-                                  // so it never changes across the
-                                  // per-keystroke rebuilds this screen
-                                  // does) makes absolutely sure Flutter
-                                  // treats this as the *same* element
-                                  // every rebuild rather than ever
-                                  // tearing it down and recreating it —
-                                  // it normally would anyway since this
-                                  // is the only widget of this type/
-                                  // position in its parent, but pinning
-                                  // it explicitly removes any doubt.
                                   child: quill.QuillEditor.basic(
                                     key: _quillEditorKey,
                                     controller: _quillController!,
@@ -873,19 +846,27 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                     controller: _quillController!,
                     editorFocusNode: _descriptionFocusNode,
                     selectedFontFamily: state.fontFamily,
-                    // Fixed: previously this only dispatched the bloc
-                    // event and never actually reformatted the Quill
-                    // document, so picking a font updated
-                    // `DiaryFormState.fontFamily` but left existing
-                    // text visually unchanged. `_applyFontFamily`
-                    // (below) does both — same helper the old modal
-                    // font-picker sheet used to call.
                     onFontSelected: _applyFontFamily,
                     onAlignmentChanged: _onAlignmentChanged,
+                    onBoldChanged: (value) =>
+                        _bloc.add(DiaryFormBoldChanged(value)),
+                    onItalicChanged: (value) =>
+                        _bloc.add(DiaryFormItalicChanged(value)),
+                    onUnderlineChanged: (value) =>
+                        _bloc.add(DiaryFormUnderlineChanged(value)),
+                    onFontSizeChanged: (value) =>
+                        _bloc.add(DiaryFormFontSizeChanged(value)),
+                    onTextColorChanged: (value) =>
+                        _bloc.add(DiaryFormTextColorChanged(value)),
                     onBackgroundPressed: () => _openBackgroundPicker(context),
                     onStickerPressed: () => _openStickerPicker(context),
                     onOverlayImagePressed: _pickOverlayImage,
                     onInlineImagePressed: _pickInlineImage,
+                    onPanelHeightChanged: (height) {
+                      setState(() {
+                        _bottomPanelHeight = height;
+                      });
+                    },
                   ),
                 ],
               ),

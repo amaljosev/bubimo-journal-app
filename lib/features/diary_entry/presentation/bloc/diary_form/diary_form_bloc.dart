@@ -65,6 +65,11 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     on<DiaryFormMoodChanged>(_onMoodChanged);
     on<DiaryFormFontFamilyChanged>(_onFontFamilyChanged);
     on<DiaryFormAlignmentChanged>(_onAlignmentChanged);
+    on<DiaryFormBoldChanged>(_onBoldChanged);
+    on<DiaryFormItalicChanged>(_onItalicChanged);
+    on<DiaryFormUnderlineChanged>(_onUnderlineChanged);
+    on<DiaryFormFontSizeChanged>(_onFontSizeChanged);
+    on<DiaryFormTextColorChanged>(_onTextColorChanged);
     on<DiaryFormImageAdded>(_onImageAdded);
     on<DiaryFormOverlayImageAdded>(_onOverlayImageAdded);
     on<DiaryFormOverlayImageTransformed>(_onOverlayImageTransformed);
@@ -110,6 +115,14 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
             date: entry.date,
             mood: entry.mood,
             fontFamily: entry.fontFamily,
+            alignment: entry.alignment,
+            isBold: entry.isBold,
+            isItalic: entry.isItalic,
+            isUnderline: entry.isUnderline,
+            fontSize: entry.fontSize,
+            clearFontSize: entry.fontSize == null,
+            textColorHex: entry.textColorHex,
+            clearTextColor: entry.textColorHex == null,
             images: entry.images,
             overlayImages: entry.overlayImages,
             stickers: entry.stickers,
@@ -171,6 +184,51 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     Emitter<DiaryFormState> emit,
   ) {
     emit(state.copyWith(alignment: event.alignment));
+  }
+
+  void _onBoldChanged(
+    DiaryFormBoldChanged event,
+    Emitter<DiaryFormState> emit,
+  ) {
+    emit(state.copyWith(isBold: event.isBold));
+  }
+
+  void _onItalicChanged(
+    DiaryFormItalicChanged event,
+    Emitter<DiaryFormState> emit,
+  ) {
+    emit(state.copyWith(isItalic: event.isItalic));
+  }
+
+  void _onUnderlineChanged(
+    DiaryFormUnderlineChanged event,
+    Emitter<DiaryFormState> emit,
+  ) {
+    emit(state.copyWith(isUnderline: event.isUnderline));
+  }
+
+  void _onFontSizeChanged(
+    DiaryFormFontSizeChanged event,
+    Emitter<DiaryFormState> emit,
+  ) {
+    emit(
+      state.copyWith(
+        fontSize: event.fontSize,
+        clearFontSize: event.fontSize == null,
+      ),
+    );
+  }
+
+  void _onTextColorChanged(
+    DiaryFormTextColorChanged event,
+    Emitter<DiaryFormState> emit,
+  ) {
+    emit(
+      state.copyWith(
+        textColorHex: event.textColorHex,
+        clearTextColor: event.textColorHex == null,
+      ),
+    );
   }
 
   void _onImageAdded(
@@ -372,6 +430,14 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
             date: state.date,
             mood: state.mood,
             fontFamily: state.fontFamily,
+            alignment: state.alignment,
+            isBold: state.isBold,
+            isItalic: state.isItalic,
+            isUnderline: state.isUnderline,
+            fontSize: state.fontSize,
+            clearFontSize: state.fontSize == null,
+            textColorHex: state.textColorHex,
+            clearTextColor: state.textColorHex == null,
             images: state.images,
             overlayImages: state.overlayImages,
             stickers: state.stickers,
@@ -396,6 +462,12 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
             date: state.date,
             mood: state.mood,
             fontFamily: state.fontFamily,
+            alignment: state.alignment,
+            isBold: state.isBold,
+            isItalic: state.isItalic,
+            isUnderline: state.isUnderline,
+            fontSize: state.fontSize,
+            textColorHex: state.textColorHex,
             images: state.images,
             overlayImages: state.overlayImages,
             stickers: state.stickers,

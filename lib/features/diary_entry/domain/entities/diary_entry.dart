@@ -69,6 +69,27 @@ class DiaryEntry extends Equatable {
   final int wordCount;
   final String? fontFamily;
 
+  /// Whole-entry text style — applies to both the title field and,
+  /// independently, the Quill [content] (which carries its own
+  /// `quill.Attribute.align` etc. inside the Delta JSON). These mirror
+  /// the form's T panel / Text color panel and exist mainly so the
+  /// plain-text title (which can't carry a Quill attribute of its own)
+  /// keeps its style across save/reload and shows correctly on the
+  /// view-only screen. One of `'left'`, `'center'`, `'right'`,
+  /// `'justify'`.
+  final String alignment;
+  final bool isBold;
+  final bool isItalic;
+  final bool isUnderline;
+
+  /// Numeric point-size string matching `flutter_quill`'s
+  /// `SizeAttribute` convention (e.g. `'20'`), or `null` for the
+  /// document's default size.
+  final String? fontSize;
+
+  /// `#RRGGBB` hex string, or `null` for the default color.
+  final String? textColorHex;
+
   final bool isFavorite;
   final bool isDeleted;
   final DateTime? deletedAt;
@@ -96,6 +117,12 @@ class DiaryEntry extends Equatable {
     this.stickers = const [],
     this.wordCount = 0,
     this.fontFamily,
+    this.alignment = 'left',
+    this.isBold = false,
+    this.isItalic = false,
+    this.isUnderline = false,
+    this.fontSize,
+    this.textColorHex,
     this.isFavorite = false,
     this.isDeleted = false,
     this.deletedAt,
@@ -140,6 +167,14 @@ class DiaryEntry extends Equatable {
     List<Sticker>? stickers,
     int? wordCount,
     String? fontFamily,
+    String? alignment,
+    bool? isBold,
+    bool? isItalic,
+    bool? isUnderline,
+    String? fontSize,
+    bool clearFontSize = false,
+    String? textColorHex,
+    bool clearTextColor = false,
     bool? isFavorite,
     bool? isDeleted,
     DateTime? deletedAt,
@@ -168,6 +203,13 @@ class DiaryEntry extends Equatable {
       stickers: stickers ?? this.stickers,
       wordCount: wordCount ?? this.wordCount,
       fontFamily: fontFamily ?? this.fontFamily,
+      alignment: alignment ?? this.alignment,
+      isBold: isBold ?? this.isBold,
+      isItalic: isItalic ?? this.isItalic,
+      isUnderline: isUnderline ?? this.isUnderline,
+      fontSize: clearFontSize ? null : (fontSize ?? this.fontSize),
+      textColorHex:
+          clearTextColor ? null : (textColorHex ?? this.textColorHex),
       isFavorite: isFavorite ?? this.isFavorite,
       isDeleted: isDeleted ?? this.isDeleted,
       deletedAt: deletedAt ?? this.deletedAt,
@@ -197,6 +239,12 @@ class DiaryEntry extends Equatable {
         stickers,
         wordCount,
         fontFamily,
+        alignment,
+        isBold,
+        isItalic,
+        isUnderline,
+        fontSize,
+        textColorHex,
         isFavorite,
         isDeleted,
         deletedAt,

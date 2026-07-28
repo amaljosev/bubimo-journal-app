@@ -92,6 +92,59 @@ final class DiaryFormAlignmentChanged extends DiaryFormEvent {
   List<Object?> get props => [alignment];
 }
 
+/// Fired when Bold/Italic/Underline are toggled from the T panel.
+/// Applies to the whole entry (title + description), same as
+/// [DiaryFormAlignmentChanged] — see `DiaryFormState.isBold` etc.
+final class DiaryFormBoldChanged extends DiaryFormEvent {
+  final bool isBold;
+
+  const DiaryFormBoldChanged(this.isBold);
+
+  @override
+  List<Object?> get props => [isBold];
+}
+
+final class DiaryFormItalicChanged extends DiaryFormEvent {
+  final bool isItalic;
+
+  const DiaryFormItalicChanged(this.isItalic);
+
+  @override
+  List<Object?> get props => [isItalic];
+}
+
+final class DiaryFormUnderlineChanged extends DiaryFormEvent {
+  final bool isUnderline;
+
+  const DiaryFormUnderlineChanged(this.isUnderline);
+
+  @override
+  List<Object?> get props => [isUnderline];
+}
+
+/// Fired when a font size is picked in the T panel. `null` means
+/// "Normal" (clear back to the document's default size).
+final class DiaryFormFontSizeChanged extends DiaryFormEvent {
+  final String? fontSize;
+
+  const DiaryFormFontSizeChanged(this.fontSize);
+
+  @override
+  List<Object?> get props => [fontSize];
+}
+
+/// Fired when a color is picked (or cleared, passing `null`) in the
+/// dedicated "Text color" panel. `null` means back to the default
+/// color.
+final class DiaryFormTextColorChanged extends DiaryFormEvent {
+  final String? textColorHex;
+
+  const DiaryFormTextColorChanged(this.textColorHex);
+
+  @override
+  List<Object?> get props => [textColorHex];
+}
+
 /// Fired after a gallery photo is inserted into the document, so the
 /// denormalized `images` list stays in sync with what's actually in the
 /// content.
