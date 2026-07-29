@@ -151,9 +151,37 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   // use it, which is exactly the crash this guards against.
   StreamSubscription<StickerPickerState>? _stickerDownloadSubscription;
 
-  // Tracks the inline panel height from the toolbar, so the scroll view
-  // can add extra bottom padding to prevent content from being hidden.
-  double _bottomPanelHeight = 0;
+  // The panel currently requested by DiaryBottomToolbar (Font, Text
+  // color, Lists, Text formatting, or a selection-scoped style/color
+  // panel), or null when none is open. Rendered by `_buildPanelOverlay`
+  // below as a full-screen Stack layered over the rest of this page's
+  // body — see that method's doc comment for why this replaced the
+  // previous `showModalBottomSheet`-based approach.
+  DiaryPanelRequest? _activePanelRequest;
+
+  // The keyboard's height at the moment a panel was opened, captured
+  // via `MediaQuery.viewInsetsOf(context).bottom` *before* unfocus
+  // in `_onPanelRequested`. This has to be captured synchronously right then
+  // — reading MediaQuery again after unfocus would see the
+  // keyboard already animating back toward 0, which is exactly the
+  // value we need the panel to hold steady at instead of following.
+  //
+  // Also drives the scroll view's extra bottom padding while a panel
+  // is open (mirrors what `_bottomPanelHeight`/`onPanelHeightChanged`
+  // used to do, back when the toolbar's panels were sheets that could
+  // report their own height).
+  double _panelHeight = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Defense-in-depth against the editor/title field reclaiming
+    // focus while a panel is open — see `_onDescriptionFocusChanged`
+    // for the full explanation of why this is needed on top of the
+    // `canRequestFocus` gating in `_onPanelRequested`/`_closePanel`.
+    _descriptionFocusNode.addListener(_onDescriptionFocusChanged);
+    _titleFocusNode.addListener(_onTitleFocusChanged);
+  }
 
   @override
   void didChangeDependencies() {
@@ -166,6 +194,8 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
 
   @override
   void dispose() {
+    _descriptionFocusNode.removeListener(_onDescriptionFocusChanged);
+    _titleFocusNode.removeListener(_onTitleFocusChanged);
     _titleController.dispose();
     _titleFocusNode.dispose();
     _descriptionFocusNode.dispose();
@@ -192,7 +222,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     // Dispatching straight to the bloc here used to rebuild the whole
     // `BlocConsumer` subtree (this screen has no per-field
     // granularity — every keystroke rebuilds `QuillEditor.basic(...)`
-    // itself, `OverlayLayer`, the header, etc.) re-entrantly, while
+    // itself, `OverlayLayer`, the header, etc.) re-entrant ly, while
     // Quill's own render objects for the very editor being typed into
     // were still mid-frame. That's what caused "This widget has been
     // unmounted... defunct" while actively typing in the description
@@ -598,6 +628,213 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     _bloc.add(DiaryFormAlignmentChanged(alignment));
   }
 
+  /// Handles [DiaryBottomToolbar.onPanelRequested] — `request` is the
+  /// panel to show, or `null` to close whatever's currently open.
+  ///
+  /// This is the actual fix for the keyboard-flicker/double-back-button
+  /// issue the sheet-based approach had. The problem with
+  /// `showModalBottomSheet` was structural, not a matter of timing it
+  /// better: a modal sheet is a *route*, and a route's entrance
+  /// transition is driven by the `Navigator`, which has no way to
+  /// synchronize with the platform IME's own close animation — that's
+  /// a separate OS-owned surface, not something Flutter's frame
+  /// scheduler has authority over. Any `unfocus()` + `await` sequence
+  /// before pushing the route can reduce the race but can't eliminate
+  /// it, because the two animations are driven by two different
+  /// systems that were never going to line up perfectly.
+  ///
+  /// So instead of animating a new surface in over a closing keyboard,
+  /// this replaces the keyboard's own footprint directly: capture its
+  /// current height, take focus away (which starts it closing), and
+  /// immediately render the panel at that exact height in the same
+  /// frame. There's no route transition to race against — the panel
+  /// occupies the space the keyboard is vacating rather than sliding
+  /// in over top of it, which is what actually removes the visible gap
+  /// rather than just narrowing it.
+  void _onPanelRequested(DiaryPanelRequest? request) {
+    if (request == null) {
+      _closePanel();
+      return;
+    }
+
+    // Order matters: read the keyboard's current height *before*
+    // unfocus ing. The instant focus leaves the editor, the platform
+    // keyboard starts animating toward 0 height — reading MediaQuery
+    // after that point would capture a value already partway through
+    // that animation, not the full height we want the panel to hold.
+    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    // The actual fix for keyboard reclaiming focus mid-panel (e.g. on
+    // every alignment/bold/italic/underline/font-size tap in the T
+    // panel): the still-mounted QuillEditor underneath reacts to its
+    // own controller changing and can request focus back on its own.
+    // Setting `canRequestFocus = false` makes any such `requestFocus()`
+    // call a structural no-op — the request never takes effect in the
+    // first place — rather than relying only on catching and reversing
+    // a grant after the fact. See `_onDescriptionFocusChanged` for the
+    // backstop that also catches this, kept as a second layer since
+    // this bug has now shown up via more than one path.
+    _descriptionFocusNode.canRequestFocus = false;
+    _titleFocusNode.canRequestFocus = false;
+
+    setState(() {
+      _activePanelRequest = request;
+      // Fall back to a sane minimum on the rare frame where the
+      // keyboard genuinely wasn't up yet (e.g. a panel opened via
+      // some path that doesn't start from the editor having focus) —
+      // 0 would collapse the panel to nothing.
+      _panelHeight = keyboardHeight > 100 ? keyboardHeight : 320;
+    });
+  }
+
+  /// Closes whatever panel is open, honoring its
+  /// [DiaryPanelRequest.refocusOnClose] flag before clearing state.
+  /// Safe to call when nothing is open (checked here, rather than
+  /// only in the toolbar's `closeActivePanel`, since this is also
+  /// reached from the overlay's own tap-outside-to-close gesture).
+  void _closePanel() {
+    if (_activePanelRequest == null) return;
+    final shouldRefocus = _activePanelRequest!.refocusOnClose;
+
+    // Reset unconditionally — both fields should always go back to
+    // normally-focusable once no panel is open, independent of
+    // whether *this particular* close should also immediately
+    // request focus (that's the separate `shouldRefocus` check below).
+    _descriptionFocusNode.canRequestFocus = true;
+    _titleFocusNode.canRequestFocus = true;
+
+    setState(() {
+      _activePanelRequest = null;
+      _panelHeight = 0;
+    });
+
+    // Keep the toolbar's own active-panel highlight state in sync,
+    // for the case where this was triggered by the overlay's
+    // tap-outside gesture rather than the toolbar itself requesting
+    // the close (e.g. `_ListPanel.onDone`, which already goes through
+    // the toolbar — this covers the outside-tap path, where the
+    // toolbar wouldn't otherwise know to clear its highlight).
+    _toolbarKey.currentState?.closeActivePanel();
+
+    if (shouldRefocus) {
+      _descriptionFocusNode.requestFocus();
+    }
+  }
+
+  /// Actively rejects focus landing back on the description field
+  /// while a panel is open — the backstop layer alongside
+  /// `canRequestFocus` gating in [_onPanelRequested]/[_closePanel].
+  ///
+  /// `canRequestFocus = false` should already prevent this structurally,
+  /// but this listener catches it too: if focus lands back on the
+  /// editor for *any* reason while a panel is open, hand it straight
+  /// back rather than trying to enumerate every possible code path
+  /// that could grant it. Cheap to keep — `FocusNode` listeners only
+  /// fire on actual focus changes, not on rebuilds, so this adds no
+  /// per-frame or per-rebuild cost.
+  void _onDescriptionFocusChanged() {
+    if (_activePanelRequest != null && _descriptionFocusNode.hasFocus) {
+      _descriptionFocusNode.unfocus();
+    }
+  }
+
+  /// Same guard as [_onDescriptionFocusChanged], for the title field.
+  void _onTitleFocusChanged() {
+    if (_activePanelRequest != null && _titleFocusNode.hasFocus) {
+      _titleFocusNode.unfocus();
+    }
+  }
+
+  /// The full-screen overlay hosting whatever panel
+  /// [_activePanelRequest] currently holds. Structured as:
+  ///
+  /// - A transparent, full-bleed tap layer (`Positioned.fill`) that
+  ///   closes the panel on tap — this is the "half the screen is
+  ///   transparent so you can still see it, tapping there closes the
+  ///   sheet" behavior.
+  /// - The panel itself, anchored to the bottom, height fixed to
+  ///   [_panelHeight] (the keyboard height captured when it opened) —
+  ///   not animated, since the goal is an instant swap into the
+  ///   keyboard's former footprint, not a sheet growing into view.
+  ///
+  /// Returns an empty, zero-size widget when no panel is requested,
+  /// so this can sit unconditionally in the `Stack` below without an
+  /// `if` at the call site — cheaper to reason about, and avoids
+  /// rebuilding the `Stack`'s child list shape on every open/close.
+  Widget _buildPanelOverlay() {
+    final request = _activePanelRequest;
+    if (request == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _closePanel,
+            // Fully transparent — this is deliberately *not* a
+            // scrim/barrier color. The whole point is that the user
+            // can still see the entry behind the panel, which is what
+            // makes this read as "preview" rather than "a dialog
+            // opened over your work".
+            child: const ColoredBox(color: Colors.transparent),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: _panelHeight,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerLow,
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.shadow.withValues(alpha: 0.14),
+                  blurRadius: 20,
+                  offset: const Offset(0, -4),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              top: false,
+              // A drag handle purely as a visual affordance (this
+              // overlay has no drag-to-dismiss gesture of its own —
+              // dismissal is tap-outside or the panel's own "done"
+              // action) — kept because every panel here used to be a
+              // `showModalBottomSheet` with `showDragHandle: true`,
+              // and dropping it would be a visible regression in feel
+              // for no functional reason.
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Container(
+                      width: 32,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.onSurfaceVariant
+                            .withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Builder(builder: request.content),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _openBackgroundPicker(BuildContext context) async {
     // Dismiss keyboard before showing background picker
     FocusScope.of(context).unfocus();
@@ -745,131 +982,152 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                     ),
                   )
                 : null,
-            child: SafeArea(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                    child: Column(
-                      children: [
-                        Listener(
-                          behavior: HitTestBehavior.translucent,
-                          onPointerDown: (_) => _toolbarKey.currentState
-                              ?.closeActivePanelAndRestoreFocus(),
-                          child: DiaryFormHeaderRow(
-                            date: state.date,
-                            mood: state.mood,
-                            moodAvatarKey: _moodAvatarKey,
-                            onDateTap: () => _pickDate(context, state.date),
-                            onMoodTap: () =>
-                                _openMoodPopover(context, state.mood),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Listener(
-                          behavior: HitTestBehavior.translucent,
-                          onPointerDown: (_) =>
-                              _toolbarKey.currentState?.closeActivePanel(),
-                          child: DiaryFormTitleField(
-                            controller: _titleController,
-                            focusNode: _titleFocusNode,
-                            nextFocusNode: _descriptionFocusNode,
-                            textAlign: _textAlignFor(state.alignment),
-                            isBold: state.isBold,
-                            isItalic: state.isItalic,
-                            isUnderlined: state.isUnderline,
-                            fontSize: state.fontSize != null
-                                ? double.tryParse(state.fontSize!)
-                                : null,
-                            textColor: _colorFromHex(state.textColorHex),
-                            onChanged: (value) => context
-                                .read<DiaryFormBloc>()
-                                .add(DiaryFormTitleChanged(value)),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                    ),
-                  ),
-
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return Listener(
-                          behavior: HitTestBehavior.translucent,
-                          onPointerDown: (_) => _toolbarKey.currentState
-                              ?.closeActivePanelAndRestoreFocus(),
-                          child: Container(
-                            key: _editorBoundsKey,
-                            width: constraints.maxWidth,
-                            height: constraints.maxHeight,
-                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                            child: SingleChildScrollView(
-                              controller: _descriptionScrollController,
-                              physics: const BouncingScrollPhysics(),
-                              padding: EdgeInsets.only(
-                                bottom: _bottomPanelHeight + 16, // Extra padding when panel is open
+            // A Stack rather than plain SafeArea/Column now, so the
+            // panel overlay (`_buildPanelOverlay`) can be layered as a
+            // second, full-screen child above the editor/toolbar/
+            // header — it needs to cover the whole page, which it
+            // couldn't do if it were hosted inside DiaryBottomToolbar
+            // itself (that widget is a fixed-height bar at the bottom
+            // of this Column, with no way to paint outside its own
+            // bounds). The original content below is unchanged, just
+            // now the Stack's first child instead of the Container's
+            // direct child.
+            child: Stack(
+              children: [
+                SafeArea(
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                        child: Column(
+                          children: [
+                            Listener(
+                              behavior: HitTestBehavior.translucent,
+                              onPointerDown: (_) => _toolbarKey.currentState
+                                  ?.closeActivePanelAndRestoreFocus(),
+                              child: DiaryFormHeaderRow(
+                                date: state.date,
+                                mood: state.mood,
+                                moodAvatarKey: _moodAvatarKey,
+                                onDateTap: () =>
+                                    _pickDate(context, state.date),
+                                onMoodTap: () =>
+                                    _openMoodPopover(context, state.mood),
                               ),
-                              child: OverlayLayer(
-                                boundsKey: _editorBoundsKey,
-                                images: state.overlayImages,
-                                stickers: state.stickers,
-                                selectedImageId: state.selectedOverlayImageId,
-                                selectedStickerId: state.selectedStickerId,
-                                onSelectImage: _onOverlayImageSelect,
-                                onSelectSticker: _onStickerSelect,
-                                onDeselect: _onOverlayImageDeselect,
-                                onImageTransform: _onOverlayImageTransform,
-                                onStickerTransform: _onStickerTransform,
-                                onRemoveImage: _onOverlayImageRemove,
-                                onRemoveSticker: _onStickerRemove,
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    minHeight: constraints.maxHeight,
+                            ),
+                            const SizedBox(height: 20),
+                            Listener(
+                              behavior: HitTestBehavior.translucent,
+                              onPointerDown: (_) => _toolbarKey.currentState
+                                  ?.closeActivePanel(),
+                              child: DiaryFormTitleField(
+                                controller: _titleController,
+                                focusNode: _titleFocusNode,
+                                nextFocusNode: _descriptionFocusNode,
+                                textAlign: _textAlignFor(state.alignment),
+                                isBold: state.isBold,
+                                isItalic: state.isItalic,
+                                isUnderlined: state.isUnderline,
+                                fontSize: state.fontSize != null
+                                    ? double.tryParse(state.fontSize!)
+                                    : null,
+                                textColor: _colorFromHex(state.textColorHex),
+                                onChanged: (value) => context
+                                    .read<DiaryFormBloc>()
+                                    .add(DiaryFormTitleChanged(value)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            return Listener(
+                              behavior: HitTestBehavior.translucent,
+                              onPointerDown: (_) => _toolbarKey.currentState
+                                  ?.closeActivePanelAndRestoreFocus(),
+                              child: Container(
+                                key: _editorBoundsKey,
+                                width: constraints.maxWidth,
+                                height: constraints.maxHeight,
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  12,
+                                  12,
+                                  16,
+                                ),
+                                child: SingleChildScrollView(
+                                  controller: _descriptionScrollController,
+                                  physics: const BouncingScrollPhysics(),
+                                  padding: EdgeInsets.only(
+                                    // Extra bottom padding while a panel
+                                    // is open, so the last line of the
+                                    // entry isn't hidden behind it.
+                                    bottom: _panelHeight + 16,
                                   ),
-                                  child: quill.QuillEditor.basic(
-                                    key: _quillEditorKey,
-                                    controller: _quillController!,
-                                    focusNode: _descriptionFocusNode,
-                                    config: _quillEditorConfig,
+                                  child: OverlayLayer(
+                                    boundsKey: _editorBoundsKey,
+                                    images: state.overlayImages,
+                                    stickers: state.stickers,
+                                    selectedImageId:
+                                        state.selectedOverlayImageId,
+                                    selectedStickerId: state.selectedStickerId,
+                                    onSelectImage: _onOverlayImageSelect,
+                                    onSelectSticker: _onStickerSelect,
+                                    onDeselect: _onOverlayImageDeselect,
+                                    onImageTransform: _onOverlayImageTransform,
+                                    onStickerTransform: _onStickerTransform,
+                                    onRemoveImage: _onOverlayImageRemove,
+                                    onRemoveSticker: _onStickerRemove,
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        minHeight: constraints.maxHeight,
+                                      ),
+                                      child: quill.QuillEditor.basic(
+                                        key: _quillEditorKey,
+                                        controller: _quillController!,
+                                        focusNode: _descriptionFocusNode,
+                                        config: _quillEditorConfig,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                            );
+                          },
+                        ),
+                      ),
+                      DiaryBottomToolbar(
+                        key: _toolbarKey,
+                        controller: _quillController!,
+                        editorFocusNode: _descriptionFocusNode,
+                        selectedFontFamily: state.fontFamily,
+                        onFontSelected: _applyFontFamily,
+                        onAlignmentChanged: _onAlignmentChanged,
+                        onBoldChanged: (value) =>
+                            _bloc.add(DiaryFormBoldChanged(value)),
+                        onItalicChanged: (value) =>
+                            _bloc.add(DiaryFormItalicChanged(value)),
+                        onUnderlineChanged: (value) =>
+                            _bloc.add(DiaryFormUnderlineChanged(value)),
+                        onFontSizeChanged: (value) =>
+                            _bloc.add(DiaryFormFontSizeChanged(value)),
+                        onTextColorChanged: (value) =>
+                            _bloc.add(DiaryFormTextColorChanged(value)),
+                        onBackgroundPressed: () =>
+                            _openBackgroundPicker(context),
+                        onStickerPressed: () => _openStickerPicker(context),
+                        onOverlayImagePressed: _pickOverlayImage,
+                        onInlineImagePressed: _pickInlineImage,
+                        onPanelRequested: _onPanelRequested,
+                      ),
+                    ],
                   ),
-                  DiaryBottomToolbar(
-                    key: _toolbarKey,
-                    controller: _quillController!,
-                    editorFocusNode: _descriptionFocusNode,
-                    selectedFontFamily: state.fontFamily,
-                    onFontSelected: _applyFontFamily,
-                    onAlignmentChanged: _onAlignmentChanged,
-                    onBoldChanged: (value) =>
-                        _bloc.add(DiaryFormBoldChanged(value)),
-                    onItalicChanged: (value) =>
-                        _bloc.add(DiaryFormItalicChanged(value)),
-                    onUnderlineChanged: (value) =>
-                        _bloc.add(DiaryFormUnderlineChanged(value)),
-                    onFontSizeChanged: (value) =>
-                        _bloc.add(DiaryFormFontSizeChanged(value)),
-                    onTextColorChanged: (value) =>
-                        _bloc.add(DiaryFormTextColorChanged(value)),
-                    onBackgroundPressed: () => _openBackgroundPicker(context),
-                    onStickerPressed: () => _openStickerPicker(context),
-                    onOverlayImagePressed: _pickOverlayImage,
-                    onInlineImagePressed: _pickInlineImage,
-                    onPanelHeightChanged: (height) {
-                      setState(() {
-                        _bottomPanelHeight = height;
-                      });
-                    },
-                  ),
-                ],
-              ),
+                ),
+                _buildPanelOverlay(),
+              ],
             ),
           ),
         );
