@@ -345,7 +345,7 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                             config: quill.QuillEditorConfig(
                               embedBuilders: [
                                 ResizableImageEmbedBuilder(),
-                                DividerEmbedBuilder(), // 👈 Added divider builder
+                                DividerEmbedBuilder(),
                                 ...FlutterQuillEmbeds.editorBuilders(),
                               ],
                             ),

@@ -655,26 +655,26 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
             onPressed: _insertDivider,
           ),
           const _ToolbarDivider(),
-          _ToolbarIconButton(
-            icon: Icons.image_outlined,
-            tooltip: 'Insert photo',
-            onPressed: widget.onInlineImagePressed,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.add_photo_alternate_outlined,
-            tooltip: 'Floating photo',
-            onPressed: widget.onOverlayImagePressed,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.emoji_emotions_outlined,
-            tooltip: 'Sticker',
-            onPressed: widget.onStickerPressed,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.wallpaper_rounded,
-            tooltip: 'Background',
-            onPressed: widget.onBackgroundPressed,
-          ),
+         _ToolbarIconButton(
+  icon: Icons.image_outlined,
+  tooltip: 'Insert photo',
+  onPressed: widget.onInlineImagePressed,
+),
+_ToolbarIconButton(
+  icon: Icons.control_camera_outlined,   // was add_photo_alternate_outlined
+  tooltip: 'Floating photo',
+  onPressed: widget.onOverlayImagePressed,
+),
+_ToolbarIconButton(
+  icon: Icons.sticky_note_2_outlined,    // was emoji_emotions_outlined
+  tooltip: 'Sticker',
+  onPressed: widget.onStickerPressed,
+),
+_ToolbarIconButton(
+  icon: Icons.wallpaper_rounded,         // unchanged
+  tooltip: 'Background',
+  onPressed: widget.onBackgroundPressed,
+),
         ],
       ),
     );

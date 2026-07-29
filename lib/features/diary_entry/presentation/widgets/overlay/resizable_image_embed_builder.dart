@@ -71,17 +71,49 @@ class ResizableImageEmbedBuilder extends quill.EmbedBuilder {
     return null;
   }
 
+  /// Parses the CSS-like value stored under the embed's `style`
+  /// attribute (e.g. `'width: 220; height: 340;'`) back into numeric
+  /// width/height.
+  ///
+  /// This is the read-side counterpart of the string [onResizeEnd]
+  /// builds below — `Attribute.fromKeyValue('style', 'width: ...;
+  /// height: ...;')` writes ONE attribute keyed `'style'` whose value
+  /// is that whole composite string. There is no separate `'width'` or
+  /// `'height'` key ever written (those are different, unrelated
+  /// attributes in flutter_quill's own registry — see `WidthAttribute`/
+  /// `HeightAttribute` vs `StyleAttribute` in `attribute.dart`), so
+  /// reading `style.attributes['width']` / `style.attributes['height']`
+  /// directly — which the previous implementation did — always misses:
+  /// those keys are never present, only `'style'` is. That mismatch is
+  /// why a resize would apply live in the editor (pure widget state,
+  /// see `_ResizableImageState`) but silently revert to the
+  /// [_defaultWidth]/[_defaultHeight] fallback every time the entry was
+  /// reloaded, even though the correct value was already being saved
+  /// to disk correctly the whole time.
+  static Map<String, double> _parseStyleSize(String? styleValue) {
+    if (styleValue == null || styleValue.isEmpty) return const {};
+    final result = <String, double>{};
+    for (final pair in styleValue.split(';')) {
+      final colon = pair.indexOf(':');
+      if (colon < 0) continue;
+      final key = pair.substring(0, colon).trim();
+      if (key != 'width' && key != 'height') continue;
+      final value = double.tryParse(pair.substring(colon + 1).trim());
+      if (value != null) result[key] = value;
+    }
+    return result;
+  }
+
   @override
   Widget build(BuildContext context, quill.EmbedContext embedContext) {
     final imageSource = embedContext.node.value.data as String;
     final style = embedContext.node.style;
 
-    final storedWidth = double.tryParse(
-      style.attributes['width']?.value?.toString() ?? '',
+    final storedSize = _parseStyleSize(
+      style.attributes['style']?.value?.toString(),
     );
-    final storedHeight = double.tryParse(
-      style.attributes['height']?.value?.toString() ?? '',
-    );
+    final storedWidth = storedSize['width'];
+    final storedHeight = storedSize['height'];
 
     return _ResizableImage(
       key: ValueKey(imageSource),
@@ -169,6 +201,40 @@ class _ResizableImageState extends State<_ResizableImage> {
     _width = widget.initialWidth;
     _height = widget.initialHeight;
     _aspectRatio = _height == 0 ? 1 : _width / _height;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ResizableImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // `initState` only runs once per `State` lifetime, but this widget
+    // is NOT guaranteed to get a fresh `State` every time its embed's
+    // saved size actually changes. `ResizableImageEmbedBuilder.build`
+    // keys `_ResizableImage` on `imageSource` alone (the image's own
+    // file path/URL) — deliberately, so remove/reinsert of a
+    // *different* image is treated as a different widget. But that
+    // also means resizing the SAME image (same `imageSource`, only
+    // its `style` attribute's width/height changed) keeps the exact
+    // same key, and Flutter's default widget-diffing has no other
+    // reason to tear down a `TextLine`/embed subtree that sits at the
+    // same position in the tree either (`RawEditorState` doesn't key
+    // its `TextLine`s — see `_getEditableTextLineFromNode` — so it's
+    // reused by position, not recreated, whenever a *new*
+    // `QuillController` is swapped in wholesale, e.g. `DiaryEntryViewPage`
+    // building a fresh controller in `_loadEntry` after returning from
+    // an edit). Net effect: this exact `_ResizableImageState` instance
+    // survives the round trip, `initState` never re-runs, and without
+    // this override it would keep showing whatever `_width`/`_height`
+    // it originally initialized with — stale by exactly one edit,
+    // which is why the fix only ever seemed to "catch up" a screen
+    // later. Re-deriving state here on every rebuild where the
+    // incoming size actually differs closes that gap.
+    if (widget.initialWidth != oldWidget.initialWidth ||
+        widget.initialHeight != oldWidget.initialHeight) {
+      _width = widget.initialWidth;
+      _height = widget.initialHeight;
+      _aspectRatio = _height == 0 ? 1 : _width / _height;
+    }
   }
 
   ImageProvider _resolveProvider(String source) {
