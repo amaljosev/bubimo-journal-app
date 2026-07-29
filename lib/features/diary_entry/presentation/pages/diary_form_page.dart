@@ -6,6 +6,7 @@ import 'package:bubimo/core/utils/background_image_utils.dart';
 import 'package:bubimo/core/utils/overlay_tint_utils.dart';
 import 'package:bubimo/core/utils/quill_document_utils.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_bottom_toolbar.dart';
+import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/date_picker_widget.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/diary_form_header.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/diary_form_overlay_settings_sheet.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/mood_popover.dart';
@@ -278,76 +279,16 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
 
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    await showModalBottomSheet<void>(
+    final picked = await showBubimoDatePicker(
       context: context,
-      backgroundColor: isDark ? theme.colorScheme.surface : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        DateTime picked = current;
-        return SafeArea(
-          child: SizedBox(
-            height: 300,
-            child: Column(
-              children: [
-                Expanded(
-                  child: CalendarDatePicker(
-                    initialDate: current,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
-                    onDateChanged: (value) => picked = value,
-                  ),
-                ),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.1),
-                        width: 0.5,
-                      ),
-                    ),
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () {
-                        if (this.context.mounted) {
-                          this.context.read<DiaryFormBloc>().add(
-                            DiaryFormDateChanged(picked),
-                          );
-                        }
-                        if (sheetContext.mounted) {
-                          Navigator.pop(sheetContext);
-                        }
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        alignment: Alignment.center,
-                        child: Text(
-                          'Done',
-                          style: TextStyle(
-                            color: theme.colorScheme.primary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+      initialDate: current,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
     );
+
+    if (picked != null && context.mounted) {
+      context.read<DiaryFormBloc>().add(DiaryFormDateChanged(picked));
+    }
   }
 
   Future<void> _openMoodPopover(BuildContext context, Mood? currentMood) async {
@@ -817,15 +758,14 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                       width: 32,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.onSurfaceVariant
-                            .withValues(alpha: 0.4),
+                        color: theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.4,
+                        ),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: Builder(builder: request.content),
-                  ),
+                  Expanded(child: Builder(builder: request.content)),
                 ],
               ),
             ),
@@ -1009,8 +949,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                                 date: state.date,
                                 mood: state.mood,
                                 moodAvatarKey: _moodAvatarKey,
-                                onDateTap: () =>
-                                    _pickDate(context, state.date),
+                                onDateTap: () => _pickDate(context, state.date),
                                 onMoodTap: () =>
                                     _openMoodPopover(context, state.mood),
                               ),
@@ -1018,8 +957,8 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                             const SizedBox(height: 20),
                             Listener(
                               behavior: HitTestBehavior.translucent,
-                              onPointerDown: (_) => _toolbarKey.currentState
-                                  ?.closeActivePanel(),
+                              onPointerDown: (_) =>
+                                  _toolbarKey.currentState?.closeActivePanel(),
                               child: DiaryFormTitleField(
                                 controller: _titleController,
                                 focusNode: _titleFocusNode,

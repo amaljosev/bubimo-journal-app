@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/core/theme/background_image_theme_extension.dart';
 import 'package:bubimo/core/utils/entry_grouping_utils.dart';
+import 'package:bubimo/features/shared/presentation/widgets/appbar_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -76,7 +77,8 @@ class _HomeViewState extends State<_HomeView> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      extendBodyBehindAppBar: headerImagePath == null,
+      extendBodyBehindAppBar: headerImagePath != null,
+      appBar:  headerImagePath == null?myAppbar(context, '', null):null,
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [

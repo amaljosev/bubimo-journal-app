@@ -133,11 +133,13 @@ class _TransformableItemState extends State<TransformableItem>
   void didUpdateWidget(TransformableItem old) {
     super.didUpdateWidget(old);
     if (_isDragging || _isHandleActive) return;
-    if (widget.initialPosition != old.initialPosition)
+    if (widget.initialPosition != old.initialPosition) {
       _position = widget.initialPosition;
+    }
     if (widget.initialScale != old.initialScale) _scale = widget.initialScale;
-    if (widget.initialRotation != old.initialRotation)
+    if (widget.initialRotation != old.initialRotation) {
       _rotation = widget.initialRotation;
+    }
   }
 
   // ── Main drag / two-finger pinch ───────────────────────────────────────────
