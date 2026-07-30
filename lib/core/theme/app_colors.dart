@@ -238,6 +238,61 @@ class AppColors {
         return isDark ? textDark : textLight;
     }
   }
+
+  // ── Onboarding gradients ────────────────────────────────────────
+  // Each entry is index-matched to primaryLight/primaryDark at the
+  // same position — the onboarding flow (see `OnboardingPageData` in
+  // the onboarding feature) picks one accent per page and fades the
+  // page background toward the matching tint here, rather than the
+  // accent's full saturation. A full-strength primary swatch used as
+  // a gradient end reads as a loud color wash; these are lifted
+  // toward near-white (light mode) or pulled toward near-black (dark
+  // mode) so the gradient stays a quiet atmospheric cue behind page
+  // content, never a competing block of color. Only the first three
+  // entries currently back an onboarding page (Dusk violet / Ocean
+  // blue / Meadow green), but all 12 are provided so the list stays
+  // index-matched with primaryLight/primaryDark if onboarding grows
+  // more pages later.
+
+  static const List<RgbaColor> onboardingGradientLight = [
+    RgbaColor(red: 236, green: 234, blue: 250), // Dusk violet tint
+    RgbaColor(red: 223, green: 242, blue: 253), // Ocean blue tint
+    RgbaColor(red: 231, green: 244, blue: 227), // Meadow green tint
+    RgbaColor(red: 253, green: 236, blue: 214), // Sunset amber tint
+    RgbaColor(red: 250, green: 228, blue: 240), // Bloom rose tint
+    RgbaColor(red: 220, green: 235, blue: 250), // Classic blue tint
+    RgbaColor(red: 240, green: 220, blue: 246), // Purple tint
+    RgbaColor(red: 250, green: 222, blue: 222), // Red tint
+    RgbaColor(red: 214, green: 238, blue: 235), // Teal tint
+    RgbaColor(red: 253, green: 232, blue: 210), // Orange tint
+    RgbaColor(red: 222, green: 238, blue: 223), // Green tint
+    RgbaColor(red: 216, green: 231, blue: 250), // Deep sky blue tint
+  ];
+
+  static const List<RgbaColor> onboardingGradientDark = [
+    RgbaColor(red: 40, green: 38, blue: 64), // Dusk violet depth
+    RgbaColor(red: 24, green: 46, blue: 58), // Ocean blue depth
+    RgbaColor(red: 28, green: 42, blue: 30), // Meadow green depth
+    RgbaColor(red: 52, green: 38, blue: 20), // Sunset amber depth
+    RgbaColor(red: 48, green: 30, blue: 40), // Bloom rose depth
+    RgbaColor(red: 22, green: 34, blue: 52), // Classic blue depth
+    RgbaColor(red: 40, green: 26, blue: 48), // Purple depth
+    RgbaColor(red: 50, green: 24, blue: 24), // Red depth
+    RgbaColor(red: 18, green: 42, blue: 40), // Teal depth
+    RgbaColor(red: 52, green: 36, blue: 16), // Orange depth
+    RgbaColor(red: 24, green: 40, blue: 26), // Green depth
+    RgbaColor(red: 20, green: 32, blue: 50), // Deep sky blue depth
+  ];
+
+  /// Returns the index-matched onboarding gradient tint for
+  /// [primaryIndex] (an index into `primaryLight`/`primaryDark`).
+  static RgbaColor onboardingGradientForPrimary(
+    int primaryIndex, {
+    required bool isDark,
+  }) {
+    final palette = isDark ? onboardingGradientDark : onboardingGradientLight;
+    return palette[primaryIndex % palette.length];
+  }
 }
 
 /// The five color roles in [AppThemeData], used with [AppColors.forRole]

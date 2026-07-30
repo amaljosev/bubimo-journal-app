@@ -108,6 +108,12 @@ import '../../features/app_lock/domain/usecases/verify_pin.dart';
 import '../../features/app_lock/domain/usecases/verify_security_answer.dart';
 import '../../features/app_lock/presentation/bloc/lock_bloc.dart';
 
+// onboarding
+import '../../features/onboarding/data/datasources/onboarding_local_data_source.dart';
+import '../../features/onboarding/domain/usecases/check_onboarding_status.dart';
+import '../../features/onboarding/domain/usecases/complete_onboarding.dart';
+import '../../features/onboarding/presentation/bloc/onboarding_bloc.dart';
+
 final GetIt getIt = GetIt.instance;
 
 /// Registers every dependency the app needs, using manual GetIt
@@ -488,5 +494,34 @@ Future<void> configureDependencies() async {
   );
   getIt.registerLazySingleton<SendSupportEmail>(
     () => SendSupportEmail(getIt<ContactRepository>()),
+  );
+
+  // --- onboarding ---
+  // Uses SharedPreferences, not the app_settings table — this is a
+  // one-shot device flag, not app data that belongs alongside
+  // reminders/theme/lock config. No AppDatabase dependency, so
+  // nothing here needs the database to be open first (unlike most
+  // other lazy singletons above).
+  getIt.registerLazySingleton(() => const OnboardingLocalDataSource());
+  // Lazy singleton: read from app_router.dart's `initialLocation`
+  // logic once per app start, not per-widget-build — a factory would
+  // work too since this use case has no internal state, but
+  // lazySingleton avoids reconstructing it pointlessly on every cold
+  // start check.
+  getIt.registerLazySingleton(
+    () => CheckOnboardingStatus(getIt<OnboardingLocalDataSource>()),
+  );
+  getIt.registerLazySingleton(
+    () => CompleteOnboarding(getIt<OnboardingLocalDataSource>()),
+  );
+  // Factory, not a singleton — mirrors ReminderSettingsBloc/
+  // CloudBackupBloc: onboarding is only ever shown once per real
+  // user, but a factory keeps this consistent with every other
+  // screen-scoped bloc in the app and avoids a stale
+  // scrollPosition/currentPage surviving if onboarding were ever
+  // re-entered (e.g. a future "replay onboarding" debug/support
+  // option).
+  getIt.registerFactory(
+    () => OnboardingBloc(completeOnboarding: getIt<CompleteOnboarding>()),
   );
 }

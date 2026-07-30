@@ -34,17 +34,37 @@ import '../bloc/diary_list/diary_list_state.dart';
 /// Its [DiaryListBloc] is provided by [MainShell] (created once, kept
 /// alive across tab switches) — this widget only consumes it via
 /// [BlocBuilder]/[context.read], it does not create it.
+///
+/// This page only ever renders the most recent [_maxHomeEntries] entries
+/// (see [_HomeViewState._cappedEntries]) — it is a preview, not the full
+/// history. The full, uncapped list lives on the Timeline tab. When more
+/// entries exist than fit in that cap, a "View more" row appears at the
+/// bottom; tapping it calls [onViewMoreInTimeline], which [MainShell]
+/// wires to switching the bottom nav to the Timeline tab (index 0) —
+/// see [MainShell._openCreateEntry]'s sibling wiring for the FAB, and
+/// the analogous `onTap: () => _onTabTapped(0)` passed down for this
+/// callback.
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, required this.onViewMoreInTimeline});
+
+  /// Invoked when the user taps the "View more" row at the bottom of a
+  /// truncated entry list. [MainShell] supplies this as a switch to the
+  /// Timeline tab (`() => _onTabTapped(0)`) rather than a route push,
+  /// since Timeline already exists as a sibling tab fed by the same
+  /// [DiaryListBloc] instance — pushing a new route would just show a
+  /// second, disconnected copy of the same data.
+  final VoidCallback onViewMoreInTimeline;
 
   @override
   Widget build(BuildContext context) {
-    return const _HomeView();
+    return _HomeView(onViewMoreInTimeline: onViewMoreInTimeline);
   }
 }
 
 class _HomeView extends StatefulWidget {
-  const _HomeView();
+  const _HomeView({required this.onViewMoreInTimeline});
+
+  final VoidCallback onViewMoreInTimeline;
 
   @override
   State<_HomeView> createState() => _HomeViewState();
@@ -52,6 +72,21 @@ class _HomeView extends StatefulWidget {
 
 class _HomeViewState extends State<_HomeView> {
   static const double _headerExpandedHeight = 200;
+
+  /// Home is a preview of the most recent entries, not the full diary.
+  /// Only this many of [DiaryListState.visibleEntries] are ever grouped
+  /// and rendered here; anything beyond this is reached via the "View
+  /// more" row, which hands off to the Timeline tab (see
+  /// [HomePage.onViewMoreInTimeline]).
+  ///
+  /// NOTE: this cap is applied client-side to whatever the bloc already
+  /// loaded into [DiaryListState.visibleEntries] — it does not change
+  /// how many entries the bloc fetches. If the bloc/repository were ever
+  /// changed to page-fetch only 20 entries at a time, this cap could no
+  /// longer distinguish "exactly 20 entries exist" from "more exist
+  /// beyond 20"; that distinction would need a real total-count/hasMore
+  /// signal from the repository. Left as UI-only per current scope.
+  static const int _maxHomeEntries = 20;
 
   // Note: creating a new entry is no longer triggered from this page's
   // own FAB — MainShell's NotchedNavBar owns a single persistent "+"
@@ -69,12 +104,23 @@ class _HomeViewState extends State<_HomeView> {
     }
   }
 
+  /// Slices [entries] down to [_maxHomeEntries] for display purposes.
+  /// Grouping and year-separator logic both run on the already-capped
+  /// list, so a day-group (and, in turn, a year) can end mid-way
+  /// through — matching the "view more" button sitting immediately
+  /// after entry 20 regardless of which day/year it happens to fall in.
+  List<DiaryEntry> _cappedEntries(List<DiaryEntry> entries) {
+    if (entries.length <= _maxHomeEntries) return entries;
+    return entries.sublist(0, _maxHomeEntries);
+  }
+
   @override
   Widget build(BuildContext context) {
     final headerImagePath = Theme.of(
       context,
     ).extension<BackgroundImageTheme>()?.imagePath;
     final colorScheme = Theme.of(context).colorScheme;
+    final currentYear = DateTime.now().year;
 
     return Scaffold(
       extendBodyBehindAppBar: headerImagePath != null,
@@ -262,10 +308,50 @@ class _HomeViewState extends State<_HomeView> {
                     );
                   }
 
+                  // Home only ever previews the most recent entries;
+                  // see [_HomeViewState._maxHomeEntries] doc for why
+                  // this is a client-side cap on top of whatever the
+                  // bloc loaded, and its limitation vs. real pagination.
+                  final totalLoadedCount = state.visibleEntries.length;
+                  final cappedEntries = _cappedEntries(state.visibleEntries);
+                  // Only meaningful as "there's more beyond what's
+                  // shown" when strictly more than the cap were loaded.
+                  // At exactly _maxHomeEntries total, everything is
+                  // already on screen, so a "View more" row would lead
+                  // to a Timeline tab showing the identical entries —
+                  // the button is gated on `>`, not `>=`, to avoid that
+                  // dead-end. See doc comment on [HomePage] for detail.
+                  final hasMoreThanCap =
+                      totalLoadedCount > _maxHomeEntries;
+
                   final dayGroups = EntryGroupingUtils.groupByDay<DiaryEntry>(
-                    state.visibleEntries,
+                    cappedEntries,
                     (entry) => entry.date,
                   );
+
+                  // Flatten day-groups into a single render list, with a
+                  // year-separator row spliced in immediately before the
+                  // first group of each year change. No separator is
+                  // ever shown for the current calendar year — the
+                  // running "last shown year" starts pre-seeded to
+                  // `currentYear`, so a leading group in the current
+                  // year never trips the "year changed" check, while a
+                  // leading group from an earlier year trips it right
+                  // away (matches "show the previous year" starting
+                  // immediately if the very first entries aren't from
+                  // this year).
+                  final rows = <_HomeRow>[];
+                  var lastShownYear = currentYear;
+                  for (final group in dayGroups) {
+                    final groupYear = group.date.year;
+                    if (groupYear != lastShownYear) {
+                      rows.add(_YearSeparatorRow(groupYear));
+                      lastShownYear = groupYear;
+                    }
+                    rows.add(
+                      _DayGroupRow(date: group.date, entries: group.entries),
+                    );
+                  }
 
                   return SliverPadding(
                     // Extra bottom inset (beyond the standard 16) so
@@ -277,39 +363,50 @@ class _HomeViewState extends State<_HomeView> {
                     // total height (flat bar + FAB protrusion).
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
                     sliver: SliverList.separated(
-                      itemCount: dayGroups.length,
+                      // +1 trailing slot for the "View more" row, only
+                      // ever populated when hasMoreThanCap is true.
+                      itemCount: rows.length + (hasMoreThanCap ? 1 : 0),
                       separatorBuilder: (_, _) => const SizedBox(height: 16),
-                      itemBuilder: (context, groupIndex) {
-                        final group = dayGroups[groupIndex];
+                      itemBuilder: (context, index) {
+                        if (index >= rows.length) {
+                          // Trailing "View more" row — only reachable
+                          // when hasMoreThanCap added the extra slot.
+                          return _ViewMoreRow(
+                            onTap: widget.onViewMoreInTimeline,
+                          );
+                        }
 
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            DateTile(date: group.date),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  for (
-                                    var i = 0;
-                                    i < group.entries.length;
-                                    i++
-                                  ) ...[
-                                    if (i > 0) const SizedBox(height: 8),
-                                    DiaryListItem(
-                                      entry: group.entries[i],
-                                      showDateColumn: false,
-                                      onTap: () => _openEntry(
-                                        context,
-                                        group.entries[i].id,
-                                      ),
-                                    ),
+                        final row = rows[index];
+                        return switch (row) {
+                          _YearSeparatorRow(:final year) =>
+                            _YearSeparatorLabel(year: year),
+                          _DayGroupRow(:final date, :final entries) => Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              DateTile(date: date),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    for (var i = 0; i < entries.length; i++)
+                                      ...[
+                                        if (i > 0)
+                                          const SizedBox(height: 8),
+                                        DiaryListItem(
+                                          entry: entries[i],
+                                          showDateColumn: false,
+                                          onTap: () => _openEntry(
+                                            context,
+                                            entries[i].id,
+                                          ),
+                                        ),
+                                      ],
                                   ],
-                                ],
+                                ),
                               ),
-                            ),
-                          ],
-                        );
+                            ],
+                          ),
+                        };
                       },
                     ),
                   );
@@ -318,6 +415,94 @@ class _HomeViewState extends State<_HomeView> {
           ),
           SliverToBoxAdapter(child: const SizedBox(height: 200)),
         ],
+      ),
+    );
+  }
+}
+
+/// Sealed render-row model for the flattened Home list: either a
+/// year-separator label or a day-group. Lets a single
+/// [SliverList.separated] mix both without a second sliver / nested
+/// list, so the existing separatorBuilder spacing keeps applying
+/// uniformly between every row, separator or not.
+///
+/// [_DayGroupRow] pulls just `date` and `entries` out of
+/// `EntryGroupingUtils`' day-group object rather than storing that
+/// object itself, since its concrete class name isn't imported here
+/// and isn't needed — the original code only ever used `group.date`
+/// (a `DateTime`) and `group.entries` (a `List<DiaryEntry>`), so
+/// storing exactly those two, concretely typed, keeps everything
+/// statically checked without introducing generics whose interaction
+/// with sealed-class pattern matching would need a Dart SDK to verify
+/// (none is available in this environment — see the network/filesystem
+/// tool results earlier in this conversation).
+sealed class _HomeRow {
+  const _HomeRow();
+}
+
+final class _YearSeparatorRow extends _HomeRow {
+  const _YearSeparatorRow(this.year);
+  final int year;
+}
+
+final class _DayGroupRow extends _HomeRow {
+  const _DayGroupRow({required this.date, required this.entries});
+  final DateTime date;
+  final List<DiaryEntry> entries;
+}
+
+/// Plain centered year label ("2023", "2022", …) marking the point
+/// where entries roll over into an earlier year. Deliberately not
+/// wrapped in a card/background — the user's spec shows it as bare
+/// "text", sitting in the flow between day-groups, not as a chip.
+class _YearSeparatorLabel extends StatelessWidget {
+  const _YearSeparatorLabel({required this.year});
+
+  final int year;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisAlignment: .end,
+      children: [
+        Text(
+          '$year',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colorScheme.primary,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Trailing row shown only when more than [_HomeViewState._maxHomeEntries]
+/// entries are loaded. Hands off to [HomePage.onViewMoreInTimeline],
+/// which [MainShell] wires to a Timeline-tab switch rather than a new
+/// route push (see [HomePage] doc comment for why).
+class _ViewMoreRow extends StatelessWidget {
+  const _ViewMoreRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Center(
+        child: TextButton.icon(
+          onPressed: onTap,
+          style: TextButton.styleFrom(
+            foregroundColor: colorScheme.primary,
+          ),
+          icon: const Icon(Icons.calendar_month_outlined, size: 18),
+          label: const Text('View more in Timeline'),
+        ),
       ),
     );
   }

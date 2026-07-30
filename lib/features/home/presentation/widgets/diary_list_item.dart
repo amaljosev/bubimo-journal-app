@@ -58,15 +58,57 @@ class DiaryListItem extends StatelessWidget {
     this.showDateColumn = true,
   });
 
+  /// Object Replacement Character (U+FFFC) — the standard placeholder
+  /// rich-text editors (e.g. Quill/`flutter_quill`, and most delta- or
+  /// document-model-based editors generally) substitute into their
+  /// plain-text extraction wherever a non-text embed (most commonly an
+  /// inline image) sits in the document. `entry.preview`/`entry.content`
+  /// are plain strings by the time they reach this widget, so if the
+  /// entry's rich body contained an inline image, this is what shows up
+  /// in that string at the image's position — Flutter's default `Text`
+  /// then renders it as a visible ".notdef"/tofu box (the dashed "OBJ"
+  /// glyph), since no font has a real glyph for it and a bare `Text`
+  /// widget has no way to know it should be substituted with something
+  /// else instead.
+  ///
+  /// [_sanitizePreview] strips every occurrence of this character out of
+  /// the raw preview text and reports how many were found, so the
+  /// visible text never shows the raw placeholder — see [build] for how
+  /// the count becomes a trailing "🖼️ N photos" indicator instead.
+  static const String _objectReplacementChar = '\uFFFC';
+
+  static final RegExp _whitespaceRun = RegExp(r'\s+');
+
+  /// Removes every [_objectReplacementChar] from [raw], collapses any
+  /// whitespace left behind where an embed used to sit (so removing an
+  /// embed from the middle of a sentence doesn't leave a visible double
+  /// space), and reports how many embeds were found.
+  ///
+  /// This is a display-layer fix only: it cleans up whatever string
+  /// [entry.preview]/[entry.content] already contains by the time it
+  /// reaches this widget. It does not change how those fields are
+  /// computed upstream — if the raw string itself should never have
+  /// contained U+FFFC in the first place, that's a separate change in
+  /// wherever that string gets built (not in this widget).
+  static ({String text, int imageCount}) _sanitizePreview(String raw) {
+    final imageCount = _objectReplacementChar.allMatches(raw).length;
+    if (imageCount == 0) return (text: raw, imageCount: 0);
+
+    final withoutEmbeds = raw.replaceAll(_objectReplacementChar, '');
+    final cleaned = withoutEmbeds.replaceAll(_whitespaceRun, ' ').trim();
+    return (text: cleaned, imageCount: imageCount);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     final title = entry.title?.isNotEmpty == true ? entry.title! : '(Untitled)';
-    final preview = entry.preview?.isNotEmpty == true
+    final rawPreview = entry.preview?.isNotEmpty == true
         ? entry.preview!
         : (entry.content ?? '');
+    final sanitizedPreview = _sanitizePreview(rawPreview);
 
     // Surface color, straight from the theme — matches what the user
     // picked in the Colors > Surface field and sees in the live
@@ -74,6 +116,10 @@ class DiaryListItem extends StatelessWidget {
     // full strength, so the real tile should match exactly.
     final cardColor = colorScheme.surface;
     final onCardColor = colorScheme.onSurfaceVariant;
+
+    final previewBaseStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: onCardColor,
+    );
 
     final card = Container(
       padding: const EdgeInsets.all(14),
@@ -118,13 +164,50 @@ class DiaryListItem extends StatelessWidget {
             style: theme.textTheme.titleSmall,
           ),
           const SizedBox(height: 2),
-          Text(
-            preview,
+          // Rendered as Text.rich rather than a plain Text so the
+          // "🖼️ N photos" indicator (see _sanitizePreview) can be
+          // appended as its own, slightly-muted TextSpan after the
+          // real body text — rather than being string-concatenated
+          // into the same span, which would make it indistinguishable
+          // from text the user actually typed. maxLines/overflow still
+          // apply to the whole thing exactly as they did on the
+          // original Text(preview, ...), so long previews still clip
+          // to 2 lines with a trailing ellipsis. Whether the indicator
+          // itself survives that clipping depends on how much real
+          // text precedes it on those 2 lines — if the body text alone
+          // already fills both, the indicator is pushed off, same as
+          // any other trailing word would be. No special-cased "always
+          // show the indicator" logic is added: this preview was
+          // already routinely truncated before this change (see the
+          // "iweruyui"/"opiu" entries in the reported screenshot, both
+          // already ending in "…"), so letting the indicator truncate
+          // like everything else is consistent, not a regression.
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: sanitizedPreview.text,
+                  style: previewBaseStyle,
+                ),
+                if (sanitizedPreview.imageCount > 0)
+                  TextSpan(
+                    // Leading space only when there's real text before
+                    // it, so an image-only entry (empty cleaned text)
+                    // doesn't show a stray leading space before the
+                    // emoji.
+                    text:
+                        '${sanitizedPreview.text.isEmpty ? '' : ' '}'
+                        '🖼️ ${sanitizedPreview.imageCount} '
+                        '${sanitizedPreview.imageCount == 1 ? 'photo' : 'photos'}',
+                    style: previewBaseStyle?.copyWith(
+                      fontStyle: FontStyle.italic,
+                      color: onCardColor.withValues(alpha: 0.75),
+                    ),
+                  ),
+              ],
+            ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: onCardColor,
-            ),
           ),
         ],
       ),

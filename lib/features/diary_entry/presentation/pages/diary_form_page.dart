@@ -257,6 +257,57 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       _quillController != null &&
       _quillController!.document.toPlainText().trim().isNotEmpty;
 
+  /// Per-entry caps on media the user can add. Checked at the top of
+  /// each picker method below, before anything (gallery, sticker
+  /// sheet) even opens — rejecting up front reads better than letting
+  /// the user pick/download something only to have it refused.
+  static const int _maxInlineImages = 5;
+  static const int _maxOverlayImages = 10;
+  static const int _maxStickers = 15;
+
+  /// Number of image embeds currently in the Quill document, found by
+  /// scanning the live document rather than trusting
+  /// `DiaryFormState.images`. That list only ever grows —
+  /// `DiaryFormBloc._onImageAdded` appends to it and nothing ever
+  /// removes from it, since deleting an inline image via its own
+  /// remove handle (`ResizableImageEmbedBuilder.onRemove`) edits the
+  /// document directly through the controller and never reports back
+  /// to the bloc. Walking the document instead mirrors
+  /// `ResizableImageEmbedBuilder._findOffset`'s own approach, so the
+  /// count always reflects what's actually in the entry right now.
+  int get _inlineImageCount {
+    final controller = _quillController;
+    if (controller == null) return 0;
+    var count = 0;
+    for (final node in controller.document.root.children) {
+      if (node is quill.Line) {
+        for (final leaf in node.children) {
+          if (leaf is quill.Embed &&
+              leaf.value.type == quill.BlockEmbed.imageType) {
+            count++;
+          }
+        }
+      }
+    }
+    return count;
+  }
+
+  /// Shown when a media button is tapped after its cap has already
+  /// been reached. The button itself is never disabled — this message
+  /// is the only feedback the user gets that nothing happened.
+  void _showLimitReachedSnackBar(String message, ColorScheme theme) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: TextStyle(color: theme.onSecondary)),
+        backgroundColor: theme.secondary,
+      ),
+    );
+  }
+
   /// Inserts an image embed (gallery photos only — stickers never go
   /// into the Quill document, they're floating overlays) at the
   /// current cursor position.
@@ -331,7 +382,18 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   /// before the item ever reaches [DiaryFormBloc]. This keeps
   /// `DiaryFormBloc` free of any network/IO concerns, matching how it
   /// never talks to Supabase directly for backgrounds either.
-  Future<void> _openStickerPicker(BuildContext context) async {
+  Future<void> _openStickerPicker(
+    BuildContext context,
+    ColorScheme colorScheme,
+  ) async {
+    if (_bloc.state.stickers.length >= _maxStickers) {
+      _showLimitReachedSnackBar(
+        'You can only add up to $_maxStickers stickers per entry.',
+        colorScheme,
+      );
+      return;
+    }
+
     // Dismiss keyboard before showing sticker picker
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
@@ -409,7 +471,15 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   }
 
   /// Picks a photo for inline insertion into the Quill document body.
-  Future<void> _pickInlineImage() async {
+  Future<void> _pickInlineImage(ColorScheme colorScheme) async {
+    if (_inlineImageCount >= _maxInlineImages) {
+      _showLimitReachedSnackBar(
+        'You can only add up to $_maxInlineImages photos in the text.',
+        colorScheme,
+      );
+      return;
+    }
+
     // Dismiss keyboard before showing image picker
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
@@ -429,7 +499,15 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   }
 
   /// Picks a photo for a free-floating overlay on top of the entry.
-  Future<void> _pickOverlayImage() async {
+  Future<void> _pickOverlayImage(ColorScheme colorScheme) async {
+    if (_bloc.state.overlayImages.length >= _maxOverlayImages) {
+      _showLimitReachedSnackBar(
+        'You can only add up to $_maxOverlayImages floating photos per entry.',
+        colorScheme,
+      );
+      return;
+    }
+
     // Dismiss keyboard before showing image picker
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
@@ -862,9 +940,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         );
 
         final canSave = state.title.trim().isNotEmpty || _hasDescriptionText;
+        final colorScheme = Theme.of(context).colorScheme;
 
         return Scaffold(
-          backgroundColor: Theme.of(context).colorScheme.surface,
+          backgroundColor: colorScheme.surface,
           extendBodyBehindAppBar: true,
           appBar: AppBar(
             backgroundColor: Colors.transparent,
@@ -1056,9 +1135,12 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                             _bloc.add(DiaryFormTextColorChanged(value)),
                         onBackgroundPressed: () =>
                             _openBackgroundPicker(context),
-                        onStickerPressed: () => _openStickerPicker(context),
-                        onOverlayImagePressed: _pickOverlayImage,
-                        onInlineImagePressed: _pickInlineImage,
+                        onStickerPressed: () =>
+                            _openStickerPicker(context, colorScheme),
+                        onOverlayImagePressed: () =>
+                            _pickOverlayImage(colorScheme),
+                        onInlineImagePressed: () =>
+                            _pickInlineImage(colorScheme),
                         onPanelRequested: _onPanelRequested,
                       ),
                     ],

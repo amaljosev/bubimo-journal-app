@@ -48,6 +48,7 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   static const int _homeIndex = 1; // Diary is the default landing tab.
+  static const int _timelineIndex = 0;
 
   int _currentIndex = _homeIndex;
 
@@ -157,7 +158,19 @@ class _MainShellState extends State<MainShell> {
               value: _diaryListBloc,
               child: const TimelinePage(),
             ),
-            BlocProvider.value(value: _diaryListBloc, child: const HomePage()),
+            BlocProvider.value(
+              value: _diaryListBloc,
+              // Home only previews the most recent entries (see
+              // HomePage's doc comment / `_maxHomeEntries`); its
+              // "View more" row hands off to the Timeline tab — the
+              // same tab this IndexedStack already keeps mounted at
+              // `_timelineIndex`, fed by this same `_diaryListBloc` —
+              // rather than pushing a new route that would just show a
+              // second, disconnected copy of the same data.
+              child: HomePage(
+                onViewMoreInTimeline: () => _onTabTapped(_timelineIndex),
+              ),
+            ),
             BlocProvider.value(
               value: _themeListBloc,
               child: const ThemeScreen(),

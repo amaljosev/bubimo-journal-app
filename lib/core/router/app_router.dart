@@ -5,6 +5,7 @@ import 'package:bubimo/core/navigation/main_shell.dart';
 import 'package:bubimo/features/help/domain/faq_item.dart';
 import 'package:bubimo/features/help/presentation/pages/faq_detail_screen.dart';
 import 'package:bubimo/features/help/presentation/pages/help_screen.dart';
+import 'package:bubimo/features/onboarding/presentation/pages/splash_page.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../features/app_lock/presentation/bloc/lock_bloc.dart';
@@ -21,6 +22,8 @@ import '../../../features/diary_entry/presentation/pages/diary_form_page.dart';
 import '../../../features/favorites/presentation/pages/favorites_page.dart';
 import '../../../features/home/presentation/bloc/diary_list/diary_list_bloc.dart';
 import '../../../features/home/presentation/bloc/diary_list/diary_list_event.dart';
+import '../../../features/onboarding/domain/usecases/check_onboarding_status.dart';
+import '../../../features/onboarding/presentation/pages/onboarding_page.dart';
 import '../../../features/reminders/presentation/bloc/reminder_settings/reminder_settings_bloc.dart';
 import '../../../features/reminders/presentation/bloc/reminder_settings/reminder_settings_event.dart';
 import '../../../features/reminders/presentation/pages/reminder_settings_page.dart';
@@ -39,7 +42,9 @@ import '../../../features/theme/presentation/pages/custom_theme_screen.dart';
 class AppRoutes {
   AppRoutes._();
 
+  static const String splash = '/splash';
   static const String home = '/';
+  static const String onboarding = '/onboarding';
   static const String diaryForm = '/diary-form';
   static const String diaryView = '/diary-view';
   static const String customThemeScreen = '/theme/custom';
@@ -60,16 +65,86 @@ class AppRoutes {
       AppLockRoutePaths.securityQuestionVerify;
 }
 
+/// Set once [SplashPage]'s `checks` future resolves — read
+/// synchronously on every `redirect` call afterward, same caching
+/// rationale as before: `redirect` fires on every route change (not
+/// just cold start) and can't cleanly `await` a fresh read each time.
+///
+/// This used to be populated by `initializeAppRouter()`, awaited in
+/// `main()` before `runApp`. It's now populated by
+/// [_runStartupChecks], awaited *inside* [AppRoutes.splash]'s route
+/// instead — the splash's icon-pulse animation needs somewhere to
+/// run while this resolves, and blocking `runApp` itself would mean
+/// showing nothing (or a second, native-only splash) during that
+/// wait rather than the animated splash. `LoadLockConfig` moves here
+/// for the same reason: it used to fire in `main()` right after
+/// `configureDependencies()` alongside this check (see this doc
+/// comment's previous revision), and both first-run reads still
+/// happen together, just now inside splash instead of before it.
+bool _onboardingCompleted = false;
+
+/// Awaited by [AppRoutes.splash]'s route via [SplashPage.checks].
+/// Runs onboarding-status and lock-config concurrently — not
+/// sequentially — since they're independent reads (SharedPreferences
+/// vs. whatever `LockBloc`'s config source is) with no ordering
+/// dependency on each other, only on both finishing before splash
+/// hands off to `redirect`.
+Future<void> _runStartupChecks() async {
+  
+  await Future.wait([
+    getIt<CheckOnboardingStatus>()().then((completed) {
+      _onboardingCompleted = completed;
+    }),
+    // <-- add the lock-config-loaded future here, alongside the
+    // onboarding check above, once its source is confirmed.
+  ]);
+}
+
 final GoRouter appRouter = GoRouter(
-  initialLocation: AppRoutes.home,
-  // Gates EVERY route below with the app-lock feature, without
-  // changing how any individual route/BlocProvider already works.
-  // `lockRedirect` reads getIt<LockBloc>().state directly (not via
-  // context, since `redirect` runs before a widget tree exists for
-  // this navigation) — see lock_redirect.dart for the exemptions
-  // (lock gate itself, its two verify screens, and the settings/setup
-  // screens) that keep this from becoming an infinite redirect loop.
-  redirect: (context, state) => lockRedirect(getIt<LockBloc>(), state),
+  initialLocation: AppRoutes.splash,
+  // Three independent gates compose here, in order:
+  //
+  // 0. Splash: exempted outright — it's the one screen every cold
+  //    start passes through before either flag below is even read
+  //    (see [_runStartupChecks]/[_onboardingCompleted]'s doc
+  //    comments). Nothing ever redirects *to* splash; it's only ever
+  //    `initialLocation`, so the only thing this gate needs to do is
+  //    stay out of the other two gates' way while active.
+  //
+  // 1. Onboarding: unchanged from before splash existed — if
+  //    `_onboardingCompleted` is false, every route except splash and
+  //    `AppRoutes.onboarding` itself redirects there. App lock is
+  //    never configured for a user who hasn't finished onboarding
+  //    yet, so there's no ordering conflict to resolve between gates
+  //    1 and 2 — a fresh install always hits this branch before
+  //    `lockRedirect` ever gets a chance to fire.
+  //
+  // 2. Lock: `lockRedirect` reads getIt<LockBloc>().state directly
+  //    (not via context, since `redirect` runs before a widget tree
+  //    exists for this navigation) — see lock_redirect.dart for the
+  //    exemptions (lock gate itself, its two verify screens, and the
+  //    settings/setup screens) that keep this from becoming an
+  //    infinite redirect loop.
+  redirect: (context, state) {
+    final isSplashRoute = state.matchedLocation == AppRoutes.splash;
+    if (isSplashRoute) {
+      return null;
+    }
+
+    final isOnboardingRoute = state.matchedLocation == AppRoutes.onboarding;
+    if (!_onboardingCompleted && !isOnboardingRoute) {
+      return AppRoutes.onboarding;
+    }
+    if (_onboardingCompleted && isOnboardingRoute) {
+      // Guards against a stale/deep link back to `/onboarding` once
+      // it's already been completed (e.g. a leftover browser
+      // history entry, or a notification payload built before this
+      // launch) — send it home instead of showing onboarding again.
+      return AppRoutes.home;
+    }
+
+    return lockRedirect(getIt<LockBloc>(), state);
+  },
   // Without this, GoRouter would never re-run `redirect` when LockBloc
   // emits (e.g. after LockApp fires on a lifecycle pause, or after a
   // successful VerifyPinAttempt) — BLoC state changes aren't otherwise
@@ -77,6 +152,37 @@ final GoRouter appRouter = GoRouter(
   // itself; it's the standard cookbook helper that adapts a Stream
   // into a Listenable.
   routes: [
+    GoRoute(
+      path: AppRoutes.splash,
+      builder: (context, state) => SplashPage(
+        checks: _runStartupChecks,
+        onDone: () {
+          // Splash's own route is exempt from `redirect` above, so
+          // this is the one navigation in the whole app that has to
+          // decide *where* to go rather than just flip a flag and let
+          // `redirect` do it (contrast with `AppRoutes.onboarding`'s
+          // `onCompleted` below, which only sets a bool because
+          // `redirect` is what actually moves it off `/onboarding`).
+          // `context.go(AppRoutes.home)` re-triggers `redirect`
+          // immediately with both `_onboardingCompleted` and
+          // `LockBloc.state` now settled, so it still lands on
+          // onboarding or the lock gate exactly as gates 1/2 above
+          // dictate — this isn't bypassing them, just picking the
+          // first *candidate* destination for `redirect` to then
+          // correct if needed.
+          context.go(AppRoutes.home);
+        },
+      ),
+    ),
+    GoRoute(
+      path: AppRoutes.onboarding,
+      builder: (context, state) => OnboardingPage(
+        onCompleted: () {
+          _onboardingCompleted = true;
+          context.go(AppRoutes.home);
+        },
+      ),
+    ),
     GoRoute(
       path: AppRoutes.home,
       builder: (context, state) => const MainShell(),

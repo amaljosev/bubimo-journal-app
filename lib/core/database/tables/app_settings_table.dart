@@ -7,6 +7,12 @@
 /// (already present in earlier schema versions) is reused as-is by the
 /// rebuilt Theme feature to persist the active theme's id — no new
 /// column/migration is needed for theme selection itself.
+///
+/// Onboarding completion is NOT stored here — it lives in
+/// SharedPreferences instead (see the onboarding feature's
+/// `OnboardingLocalDataSource`), since it's a simple one-shot device
+/// flag rather than app data that belongs alongside reminders/theme/
+/// lock config.
 class AppSettingsTable {
   AppSettingsTable._();
 
