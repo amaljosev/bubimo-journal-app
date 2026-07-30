@@ -44,19 +44,13 @@ class SupabaseStickerDataSource {
   /// Paginates each category with an explicit, incrementing `offset` —
   /// omitting this causes the same page to be fetched forever once a
   /// category has more than [_pageSize] files.
-  ///
   /// Category (folder) detection: Supabase Storage represents
-  /// subfolders as pseudo-file entries whose `metadata` is either null
+  /// subfolder as pseudo-file entries whose `metadata` is either null
   /// or missing an `eTag` — real files always have an `eTag`.
   Future<Map<String, List<String>>> getStickersByCategory() async {
-    log('--- getStickersByCategory() START ---', name: _logTag);
-    log('bucket="$_bucket" rootPath="$_rootPath"', name: _logTag);
-
     final List<FileObject> folders;
     try {
-      folders = await _supabase.storage.from(_bucket).list(
-            path: _rootPath,
-          );
+      folders = await _supabase.storage.from(_bucket).list(path: _rootPath);
     } catch (e, st) {
       log(
         'FAILED to list root path "$_rootPath" in bucket "$_bucket". '
@@ -69,13 +63,6 @@ class SupabaseStickerDataSource {
       rethrow;
     }
 
-    log('Raw entries under "$_rootPath": ${folders.length}', name: _logTag);
-    for (final f in folders) {
-      log(
-        '  entry name="${f.name}" id=${f.id} metadata=${f.metadata}',
-        name: _logTag,
-      );
-    }
 
     if (folders.isEmpty) {
       log(
@@ -91,12 +78,6 @@ class SupabaseStickerDataSource {
     final categoryEntries = folders
         .where((f) => f.metadata == null || f.metadata!['eTag'] == null)
         .toList();
-
-    log(
-      'Detected ${categoryEntries.length} folder-like entries '
-      '(out of ${folders.length} total) using the metadata/eTag heuristic.',
-      name: _logTag,
-    );
 
     if (categoryEntries.isEmpty && folders.isNotEmpty) {
       log(
@@ -115,21 +96,20 @@ class SupabaseStickerDataSource {
     final Map<String, List<String>> result = {};
 
     for (final category in categoryNames) {
-      log('--- Listing category "$category" ---', name: _logTag);
       final urls = <String>[];
       int offset = 0;
       bool hasMore = true;
+      // ignore: unused_local_variable
       int page = 0;
 
       while (hasMore) {
         final List<FileObject> files;
         try {
-          files = await _supabase.storage.from(_bucket).list(
+          files = await _supabase.storage
+              .from(_bucket)
+              .list(
                 path: '$_rootPath/$category',
-                searchOptions: SearchOptions(
-                  limit: _pageSize,
-                  offset: offset,
-                ),
+                searchOptions: SearchOptions(limit: _pageSize, offset: offset),
               );
         } catch (e, st) {
           log(
@@ -141,13 +121,9 @@ class SupabaseStickerDataSource {
           rethrow;
         }
 
-        log(
-          'category="$category" page=$page offset=$offset -> '
-          '${files.length} entries: ${files.map((f) => f.name).toList()}',
-          name: _logTag,
-        );
-
-        final imageFiles = files.where((f) => _isSupportedImage(f.name)).toList();
+        final imageFiles = files
+            .where((f) => _isSupportedImage(f.name))
+            .toList();
 
         final skipped = files.where((f) => !_isSupportedImage(f.name)).toList();
         if (skipped.isNotEmpty) {
@@ -163,7 +139,6 @@ class SupabaseStickerDataSource {
           final publicUrl = _supabase.storage
               .from(_bucket)
               .getPublicUrl('$_rootPath/$category/${file.name}');
-          log('  -> $publicUrl', name: _logTag);
           urls.add(publicUrl);
         }
 
@@ -175,19 +150,8 @@ class SupabaseStickerDataSource {
         }
       }
 
-      log(
-        'category="$category" TOTAL usable image URLs: ${urls.length}',
-        name: _logTag,
-      );
       result[category] = urls;
     }
-
-    log(
-      '--- getStickersByCategory() DONE. '
-      'Categories: ${result.keys.toList()}. '
-      'Counts: ${result.map((k, v) => MapEntry(k, v.length))} ---',
-      name: _logTag,
-    );
 
     return result;
   }
@@ -199,33 +163,31 @@ class SupabaseStickerDataSource {
   /// download, or restored from a backup that preserved app documents),
   /// the cached copy is returned immediately with no network request.
   Future<String> downloadSticker(String url) async {
-    log('downloadSticker() START url=$url', name: _logTag);
-
     final uri = Uri.parse(url);
-    final fileName = uri.pathSegments.last;
+
+    // Namespaced by category, not just the bare filename: Storage
+    // layout is stickers/<category>/<file>, and two categories could
+    // otherwise collide on a same-named file (e.g. two designers both
+    // exporting "sticker1.png" into different category folders) and
+    // silently serve one category's bytes under the other's URL.
+    final segments = uri.pathSegments;
+    final category = segments.length >= 2 ? segments[segments.length - 2] : '';
+    final fileName = category.isEmpty
+        ? segments.last
+        : '${category}_${segments.last}';
 
     final appDir = await getApplicationDocumentsDirectory();
     final stickerDir = Directory('${appDir.path}/stickers');
     if (!await stickerDir.exists()) {
       await stickerDir.create(recursive: true);
-      log('Created sticker cache dir at ${stickerDir.path}', name: _logTag);
     }
 
     final localFile = File('${stickerDir.path}/$fileName');
     if (await localFile.exists()) {
-      log('Cache HIT: returning existing file ${localFile.path}', name: _logTag);
       return localFile.path;
     }
 
-    log('Cache MISS. Downloading from network: $uri', name: _logTag);
     final response = await http.get(uri);
-
-    log(
-      'HTTP response status=${response.statusCode} '
-      'contentType=${response.headers['content-type']} '
-      'bodyBytes=${response.bodyBytes.length}',
-      name: _logTag,
-    );
 
     if (response.statusCode != 200) {
       log(
@@ -241,7 +203,6 @@ class SupabaseStickerDataSource {
     }
 
     await localFile.writeAsBytes(response.bodyBytes);
-    log('Saved sticker to ${localFile.path}', name: _logTag);
     return localFile.path;
   }
 }

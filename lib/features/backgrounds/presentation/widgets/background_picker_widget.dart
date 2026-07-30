@@ -3,6 +3,8 @@
 import 'dart:io';
 
 import 'package:bubimo/core/error/exceptions.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,12 +16,8 @@ import '../bloc/background_picker/background_picker_event.dart';
 import '../bloc/background_picker/background_picker_state.dart';
 
 /// Where a selected background came from — determines which of
-/// `DiaryEntry`'s three background fields the caller should set.
+/// `DiaryEntry`'s two background fields the caller should set.
 enum BackgroundSourceType {
-  /// A bundled local asset — always available offline, no caching
-  /// needed. Caller should set `bgImagePath`.
-  presetLocal,
-
   /// A Supabase-fetched preset, already downloaded and cached locally
   /// by the time this is returned. Caller should set `bgLocalPath`.
   presetRemote,
@@ -36,10 +34,10 @@ class SelectedBackground {
   const SelectedBackground({required this.type, required this.path});
 }
 
-/// Lets the user choose a background: bundled presets, Supabase-fetched
-/// presets (if online), or their own gallery photo. Returns the
-/// selection via [onSelected] — this widget doesn't touch the diary
-/// entry itself, the caller (diary_form_page) applies it based on
+/// Lets the user choose a background: Supabase-fetched presets (if
+/// online), or their own gallery photo. Returns the selection via
+/// [onSelected] — this widget doesn't touch the diary entry itself,
+/// the caller (diary_form_page) applies it based on
 /// [SelectedBackground.type].
 class BackgroundPickerWidget extends StatefulWidget {
   final ValueChanged<SelectedBackground> onSelected;
@@ -117,6 +115,11 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
               ],
             ),
             Expanded(
+              // AutomaticKeepAliveClientMixin on each tab (below) needs
+              // TabBarView to not tear the tab down when it scrolls
+              // offscreen — that disposal is what forces a rebuild (and
+              // re-decode of every already-local image) on every switch
+              // back to a previously-viewed tab.
               child: TabBarView(
                 controller: _tabController,
                 children: [
@@ -132,31 +135,29 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
   }
 }
 
-class _PresetsTab extends StatelessWidget {
+class _PresetsTab extends StatefulWidget {
   final ValueChanged<SelectedBackground> onSelected;
 
   const _PresetsTab({required this.onSelected});
 
   @override
+  State<_PresetsTab> createState() => _PresetsTabState();
+}
+
+class _PresetsTabState extends State<_PresetsTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
+
     return BlocBuilder<BackgroundPickerBloc, BackgroundPickerState>(
       builder: (context, state) {
         return ListView(
           padding: const EdgeInsets.all(12),
           children: [
-            Text('Bundled', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            _BackgroundGrid(
-              paths: state.localPresets,
-              isAsset: true,
-              onTap: (path) => onSelected(
-                SelectedBackground(
-                  type: BackgroundSourceType.presetLocal,
-                  path: path,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
             Text('Downloaded', style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 8),
             if (!state.remoteFetchAttempted)
@@ -183,8 +184,7 @@ class _PresetsTab extends StatelessWidget {
             else
               _BackgroundGrid(
                 paths: state.remotePresets,
-                isAsset: false,
-                onTap: (path) => onSelected(
+                onTap: (path) => widget.onSelected(
                   SelectedBackground(
                     type: BackgroundSourceType.presetRemote,
                     path: path,
@@ -200,14 +200,9 @@ class _PresetsTab extends StatelessWidget {
 
 class _BackgroundGrid extends StatelessWidget {
   final List<String> paths;
-  final bool isAsset;
   final ValueChanged<String> onTap;
 
-  const _BackgroundGrid({
-    required this.paths,
-    required this.isAsset,
-    required this.onTap,
-  });
+  const _BackgroundGrid({required this.paths, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -235,9 +230,24 @@ class _BackgroundGrid extends StatelessWidget {
           onTap: () => onTap(path),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: isAsset
-                ? Image.asset(path, fit: BoxFit.cover)
-                : Image.file(File(path), fit: BoxFit.cover),
+            // `path` is the Supabase public URL for this preset, not a
+            // local file path — CachedNetworkImage resolves the
+            // network-vs-disk-cache decision itself and shows
+            // `placeholder` while that resolves, same pattern as the
+            // sticker grid's thumbnails.
+            child: CachedNetworkImage(
+              imageUrl: path,
+              fit: BoxFit.cover,
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+              placeholder: (_, _) => const Center(
+                child: CupertinoActivityIndicator(),
+              ),
+              errorWidget: (_, _, _) => const Icon(
+                Icons.broken_image,
+                color: Colors.grey,
+              ),
+            ),
           ),
         );
       },
@@ -245,16 +255,27 @@ class _BackgroundGrid extends StatelessWidget {
   }
 }
 
-class _GalleryTab extends StatelessWidget {
+class _GalleryTab extends StatefulWidget {
   final VoidCallback onPickPressed;
 
   const _GalleryTab({required this.onPickPressed});
 
   @override
+  State<_GalleryTab> createState() => _GalleryTabState();
+}
+
+class _GalleryTabState extends State<_GalleryTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
+
     return Center(
       child: FilledButton.icon(
-        onPressed: onPickPressed,
+        onPressed: widget.onPickPressed,
         icon: const Icon(Icons.photo_library_outlined),
         label: const Text('Choose from gallery'),
       ),

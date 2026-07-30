@@ -1,5 +1,6 @@
 // lib/features/diary_entry/presentation/pages/diary_entry_view_page.dart
 
+import 'package:bubimo/core/navigation/debounced_tap.dart';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/core/utils/background_image_utils.dart';
 import 'package:bubimo/core/utils/overlay_tint_utils.dart';
@@ -201,6 +202,7 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
       },
       child: Scaffold(
         extendBodyBehindAppBar: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -222,9 +224,13 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                           ),
                     onPressed: _isTogglingFavorite ? null : _toggleFavorite,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: _editEntry,
+                  DebouncedTap(
+                    onTap: _editEntry,
+                    borderRadius: BorderRadius.circular(24),
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(Icons.edit_outlined),
+                    ),
                   ),
                   IconButton(
                     icon: _isDeleting
@@ -287,47 +293,48 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                 child: Column(
                   crossAxisAlignment: _crossAxisFor(entry.alignment),
                   children: [
-                  if (entry.mood != null)
-                    Text(
-                      entry.mood!.emoji,
-                      style: const TextStyle(fontSize: 32),
+                    if (entry.mood != null)
+                      Text(
+                        entry.mood!.emoji,
+                        style: const TextStyle(fontSize: 32),
+                      ),
+                    const SizedBox(height: 8),
+                    Builder(
+                      builder: (context) {
+                        final baseStyle = Theme.of(
+                          context,
+                        ).textTheme.headlineSmall;
+                        return Text(
+                          entry.title?.isNotEmpty == true
+                              ? entry.title!
+                              : 'Untitled',
+                          textAlign: _textAlignFor(entry.alignment),
+                          style: baseStyle?.copyWith(
+                            fontWeight: entry.isBold
+                                ? FontWeight.w900
+                                : baseStyle.fontWeight,
+                            fontStyle: entry.isItalic
+                                ? FontStyle.italic
+                                : FontStyle.normal,
+                            decoration: entry.isUnderline
+                                ? TextDecoration.underline
+                                : TextDecoration.none,
+                            fontSize: entry.fontSize != null
+                                ? double.tryParse(entry.fontSize!)
+                                : baseStyle.fontSize,
+                            color: entry.textColorHex != null
+                                ? _colorFromHex(entry.textColorHex!)
+                                : baseStyle.color,
+                          ),
+                        );
+                      },
                     ),
-                  const SizedBox(height: 8),
-                  Builder(
-                    builder: (context) {
-                      final baseStyle =
-                          Theme.of(context).textTheme.headlineSmall;
-                      return Text(
-                        entry.title?.isNotEmpty == true
-                            ? entry.title!
-                            : 'Untitled',
-                        textAlign: _textAlignFor(entry.alignment),
-                        style: baseStyle?.copyWith(
-                          fontWeight: entry.isBold
-                              ? FontWeight.w900
-                              : baseStyle.fontWeight,
-                          fontStyle: entry.isItalic
-                              ? FontStyle.italic
-                              : FontStyle.normal,
-                          decoration: entry.isUnderline
-                              ? TextDecoration.underline
-                              : TextDecoration.none,
-                          fontSize: entry.fontSize != null
-                              ? double.tryParse(entry.fontSize!)
-                              : baseStyle.fontSize,
-                          color: entry.textColorHex != null
-                              ? _colorFromHex(entry.textColorHex!)
-                              : baseStyle.color,
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    AppDateUtils.toDisplayString(entry.date),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      AppDateUtils.toDisplayString(entry.date),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
               ),
             ),

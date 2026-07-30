@@ -3,6 +3,7 @@
 import 'dart:developer';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -22,8 +23,8 @@ Future<String?> showStickerPickerSheet(BuildContext context) {
     context: context,
     isScrollControlled: true,
     builder: (sheetContext) => BlocProvider(
-      create: (_) => getIt<StickerPickerBloc>()
-        ..add(const StickerPickerRequested()),
+      create: (_) =>
+          getIt<StickerPickerBloc>()..add(const StickerPickerRequested()),
       child: const _StickerPickerSheet(),
     ),
   );
@@ -49,7 +50,6 @@ class _StickerPickerSheet extends StatelessWidget {
               return const Center(child: CircularProgressIndicator());
             }
 
-
             if (state.categoriesError != null) {
               return Center(
                 child: Column(
@@ -68,16 +68,15 @@ class _StickerPickerSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     FilledButton.tonal(
-                      onPressed: () => context
-                          .read<StickerPickerBloc>()
-                          .add(const StickerPickerRetried()),
+                      onPressed: () => context.read<StickerPickerBloc>().add(
+                        const StickerPickerRetried(),
+                      ),
                       child: const Text('Try again'),
                     ),
                   ],
                 ),
               );
             }
-            
 
             final categories = state.stickersByCategory.keys.toList();
             log(categories.toString());
@@ -90,9 +89,7 @@ class _StickerPickerSheet extends StatelessWidget {
                     Icon(
                       Icons.auto_awesome_outlined,
                       size: 64,
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.3,
-                      ),
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -128,52 +125,16 @@ class _StickerPickerSheet extends StatelessWidget {
                     child: TabBarView(
                       children: categories.map((category) {
                         final urls = state.stickersByCategory[category] ?? [];
-
-                        if (urls.isEmpty) {
-                          return Center(
-                            child: Text(
-                              'Nothing in this category',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurface
-                                    .withValues(alpha: 0.5),
-                              ),
-                            ),
-                          );
-                        }
-
-                        return GridView.builder(
-                          padding: const EdgeInsets.all(16),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            mainAxisSpacing: 12,
-                            crossAxisSpacing: 12,
-                            childAspectRatio: 1,
-                          ),
-                          itemCount: urls.length,
-                          itemBuilder: (context, index) {
-                            final url = urls[index];
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: () => Navigator.pop(context, url),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: CachedNetworkImage(
-                                  imageUrl: url,
-                                  fit: BoxFit.contain,
-                                  fadeInDuration: Duration.zero,
-                                  fadeOutDuration: Duration.zero,
-                                  placeholder: (_, _) =>
-                                      const SizedBox.shrink(),
-                                  errorWidget: (_, _, _) => const Icon(
-                                    Icons.broken_image,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        );
+                        // Extracted into its own StatefulWidget (below)
+                        // specifically so AutomaticKeepAliveClientMixin
+                        // has something to attach to — TabBarView
+                        // disposes offscreen tabs by default, which was
+                        // tearing down each grid (and its already-cached
+                        // CachedNetworkImage widgets) on every tab
+                        // switch and forcing a full placeholder-then-
+                        // decode cycle on return, even though the bytes
+                        // were already on disk.
+                        return _StickerGrid(urls: urls);
                       }).toList(),
                     ),
                   ),
@@ -183,6 +144,77 @@ class _StickerPickerSheet extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Renders a single category's sticker grid.
+///
+/// Kept alive across tab switches via [AutomaticKeepAliveClientMixin]
+/// so [CachedNetworkImage]'s in-memory image cache (and the disk-cache
+/// lookups it already resolved) aren't discarded and re-paid-for every
+/// time the user flips back to a previously-viewed tab.
+class _StickerGrid extends StatefulWidget {
+  const _StickerGrid({required this.urls});
+
+  final List<String> urls;
+
+  @override
+  State<_StickerGrid> createState() => _StickerGridState();
+}
+
+class _StickerGridState extends State<_StickerGrid>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    // Required by AutomaticKeepAliveClientMixin — omitting this call
+    // means wantKeepAlive is silently ignored.
+    super.build(context);
+
+    if (widget.urls.isEmpty) {
+      return Center(
+        child: Text(
+          'Nothing in this category',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.5),
+          ),
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 6,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 1,
+      ),
+      itemCount: widget.urls.length,
+      itemBuilder: (context, index) {
+        final url = widget.urls[index];
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => Navigator.pop(context, url),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: CachedNetworkImage(
+              imageUrl: url,
+              fit: BoxFit.contain,
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+              placeholder: (_, _) => const CupertinoActivityIndicator(),
+              errorWidget: (_, _, _) =>
+                  const Icon(Icons.broken_image, color: Colors.grey),
+            ),
+          ),
+        );
+      },
     );
   }
 }

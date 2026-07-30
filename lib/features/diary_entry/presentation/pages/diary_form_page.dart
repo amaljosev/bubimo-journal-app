@@ -784,8 +784,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     if (selection == null) return;
 
     switch (selection.type) {
-      case BackgroundSourceType.presetLocal:
-        _bloc.add(DiaryFormBackgroundChanged(bgImagePath: selection.path));
       case BackgroundSourceType.presetRemote:
         _bloc.add(DiaryFormBackgroundChanged(bgLocalPath: selection.path));
       case BackgroundSourceType.gallery:
@@ -866,6 +864,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         final canSave = state.title.trim().isNotEmpty || _hasDescriptionText;
 
         return Scaffold(
+          backgroundColor: Theme.of(context).colorScheme.surface,
           extendBodyBehindAppBar: true,
           appBar: AppBar(
             backgroundColor: Colors.transparent,

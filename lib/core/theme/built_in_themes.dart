@@ -34,7 +34,7 @@ class BuiltInThemes {
 
   /// The theme "Reset to Default" applies, and the one used on very
   /// first launch before any selection has been persisted.
-  static const String defaultBuiltInThemeId = duskId;
+  static const String defaultBuiltInThemeId = 'bloom';
 
   /// Bundled asset paths for the built-in themes that ship a header
   /// image.

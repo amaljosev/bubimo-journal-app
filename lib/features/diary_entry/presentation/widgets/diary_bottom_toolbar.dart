@@ -1,5 +1,6 @@
 // lib/features/diary_entry/presentation/widgets/diary_bottom_toolbar.dart
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 
@@ -141,7 +142,7 @@ class DiaryBottomToolbar extends StatefulWidget {
 enum _ActivePanel { none, textFormat, list, font, textColor, selectionColor }
 
 class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
-  static const double _barHeight = 48;
+  static const double _barHeight = 60;
 
   _ActivePanel _activePanel = _ActivePanel.none;
 
@@ -247,10 +248,8 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   void _openListPanel() {
     _requestPanel(
       _ActivePanel.list,
-      (panelContext) => _ListPanel(
-        controller: widget.controller,
-        onDone: closeActivePanel,
-      ),
+      (panelContext) =>
+          _ListPanel(controller: widget.controller, onDone: closeActivePanel),
       refocusOnClose: false,
     );
   }
@@ -305,10 +304,8 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     final style = widget.controller.getSelectionStyle();
     _requestPanel(
       _ActivePanel.selectionColor, // shares the row's single "active" slot
-      (panelContext) => _StylePickerSheet(
-        controller: widget.controller,
-        initialStyle: style,
-      ),
+      (panelContext) =>
+          _StylePickerSheet(controller: widget.controller, initialStyle: style),
       refocusOnClose: true,
     );
   }
@@ -321,48 +318,55 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     // The bar itself still reads as a lifted, rounded card — that part
     // of the earlier redesign holds regardless of how its panels are
     // presented.
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(
-        top: Radius.circular(ThemeRadii.xxl),
-      ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          boxShadow: [
-            BoxShadow(
-              color: theme.colorScheme.shadow.withValues(alpha: 0.10),
-              blurRadius: 20,
-              offset: const Offset(0, -6),
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.only(left: 10.0, top: 10.0, bottom: 10.0),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(ThemeRadii.xxl),
+            bottomLeft: Radius.circular(ThemeRadii.xxl),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onPrimary,
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.shadow.withValues(alpha: 0.10),
+                  blurRadius: 20,
+                  offset: const Offset(0, -6),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: SizedBox(
-          height: _barHeight,
-          child: AnimatedSwitcher(
-            duration: ThemeDurations.fast,
-            switchInCurve: Curves.easeOut,
-            switchOutCurve: Curves.easeIn,
-            child: hasSelection
-                ? _SelectionToolsRow(
-                    key: const ValueKey('selection'),
-                    controller: widget.controller,
-                    activePanel: _activePanel,
-                    onOpenStylePicker: _openStylePicker,
-                    onOpenColorPanel: _openSelectionColorPanel,
-                  )
-                : _CommonToolsRow(
-                    key: const ValueKey('common'),
-                    controller: widget.controller,
-                    activePanel: _activePanel,
-                    onOpenTextFormatPanel: _openTextFormatPanel,
-                    onOpenListPanel: _openListPanel,
-                    onOpenFontPanel: _openFontPanel,
-                    onOpenTextColorPanel: _openTextColorPanel,
-                    onBackgroundPressed: widget.onBackgroundPressed,
-                    onStickerPressed: widget.onStickerPressed,
-                    onOverlayImagePressed: widget.onOverlayImagePressed,
-                    onInlineImagePressed: widget.onInlineImagePressed,
-                  ),
+            child: SizedBox(
+              height: _barHeight,
+
+              child: AnimatedSwitcher(
+                duration: ThemeDurations.fast,
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: hasSelection
+                    ? _SelectionToolsRow(
+                        key: const ValueKey('selection'),
+                        controller: widget.controller,
+                        activePanel: _activePanel,
+                        onOpenStylePicker: _openStylePicker,
+                        onOpenColorPanel: _openSelectionColorPanel,
+                      )
+                    : _CommonToolsRow(
+                        key: const ValueKey('common'),
+                        controller: widget.controller,
+                        activePanel: _activePanel,
+                        onOpenTextFormatPanel: _openTextFormatPanel,
+                        onOpenListPanel: _openListPanel,
+                        onOpenFontPanel: _openFontPanel,
+                        onOpenTextColorPanel: _openTextColorPanel,
+                        onBackgroundPressed: widget.onBackgroundPressed,
+                        onStickerPressed: widget.onStickerPressed,
+                        onOverlayImagePressed: widget.onOverlayImagePressed,
+                        onInlineImagePressed: widget.onInlineImagePressed,
+                      ),
+              ),
+            ),
           ),
         ),
       ),
@@ -386,16 +390,14 @@ class _ToolbarIconButton extends StatelessWidget {
     required this.onPressed,
     this.isActive = false,
   }) : assert(
-          icon != null || textLabel != null,
-          'Provide either icon or textLabel',
-        );
+         icon != null || textLabel != null,
+         'Provide either icon or textLabel',
+       );
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = isActive
-        ? theme.colorScheme.primary
-        : theme.colorScheme.onSurfaceVariant;
+    final color = theme.colorScheme.primary;
 
     return Tooltip(
       message: tooltip,
@@ -438,8 +440,9 @@ class _ToolbarDivider extends StatelessWidget {
       width: 1,
       height: 24,
       margin: const EdgeInsets.symmetric(horizontal: ThemeSpacing.xs),
-      color:
-          Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
+      color: Theme.of(
+        context,
+      ).colorScheme.outlineVariant.withValues(alpha: 0.6),
     );
   }
 }
@@ -619,7 +622,8 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
           _ToolbarIconButton(
             textLabel: 'T',
             tooltip: 'Text formatting',
-            isActive: widget.activePanel == _ActivePanel.textFormat ||
+            isActive:
+                widget.activePanel == _ActivePanel.textFormat ||
                 _isAnyTextFormatActive,
             onPressed: widget.onOpenTextFormatPanel,
           ),
@@ -632,15 +636,16 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
           _ToolbarIconButton(
             icon: Icons.format_color_text_rounded,
             tooltip: 'Text color',
-            isActive: widget.activePanel == _ActivePanel.textColor ||
+            isActive:
+                widget.activePanel == _ActivePanel.textColor ||
                 _hasDocumentTextColor,
             onPressed: widget.onOpenTextColorPanel,
           ),
           _ToolbarIconButton(
             icon: Icons.format_list_bulleted_rounded,
             tooltip: 'Lists',
-            isActive: widget.activePanel == _ActivePanel.list ||
-                _isAnyListActive,
+            isActive:
+                widget.activePanel == _ActivePanel.list || _isAnyListActive,
             onPressed: widget.onOpenListPanel,
           ),
           _ToolbarIconButton(
@@ -655,26 +660,26 @@ class _CommonToolsRowState extends State<_CommonToolsRow> {
             onPressed: _insertDivider,
           ),
           const _ToolbarDivider(),
-         _ToolbarIconButton(
-  icon: Icons.image_outlined,
-  tooltip: 'Insert photo',
-  onPressed: widget.onInlineImagePressed,
-),
-_ToolbarIconButton(
-  icon: Icons.control_camera_outlined,   // was add_photo_alternate_outlined
-  tooltip: 'Floating photo',
-  onPressed: widget.onOverlayImagePressed,
-),
-_ToolbarIconButton(
-  icon: Icons.sticky_note_2_outlined,    // was emoji_emotions_outlined
-  tooltip: 'Sticker',
-  onPressed: widget.onStickerPressed,
-),
-_ToolbarIconButton(
-  icon: Icons.wallpaper_rounded,         // unchanged
-  tooltip: 'Background',
-  onPressed: widget.onBackgroundPressed,
-),
+          _ToolbarIconButton(
+            icon: Icons.image_outlined,
+            tooltip: 'Insert photo',
+            onPressed: widget.onInlineImagePressed,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.photo_size_select_large_sharp,
+            tooltip: 'Floating photo',
+            onPressed: widget.onOverlayImagePressed,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.auto_awesome_outlined,
+            tooltip: 'Sticker',
+            onPressed: widget.onStickerPressed,
+          ),
+          _ToolbarIconButton(
+            icon: CupertinoIcons.layers,
+            tooltip: 'Background',
+            onPressed: widget.onBackgroundPressed,
+          ),
         ],
       ),
     );
@@ -813,8 +818,9 @@ class _TextFormatPanelState extends State<_TextFormatPanel> {
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
                     child: _ToolbarIconButton(
-                      icon: _alignmentIcons[
-                          (alignment.value as String?) ?? 'left'],
+                      icon:
+                          _alignmentIcons[(alignment.value as String?) ??
+                              'left'],
                       tooltip: (alignment.value as String?) ?? 'left',
                       isActive:
                           (alignment.value ?? 'left') == _currentAlignment,
@@ -921,8 +927,9 @@ class _ColorRoleSelector extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(ThemeRadii.sm),
                   side: BorderSide(
-                    color:
-                        theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.6,
+                    ),
                   ),
                 ),
                 selectedColor: theme.colorScheme.primary,
@@ -1178,7 +1185,8 @@ class _ListPanelState extends State<_ListPanel> {
           _ListOptionRow(
             icon: Icons.checklist_rounded,
             label: 'Checklist',
-            isActive: _isActive(quill.Attribute.unchecked) ||
+            isActive:
+                _isActive(quill.Attribute.unchecked) ||
                 _isActive(quill.Attribute.checked),
             onTap: () => _toggleAndClose(quill.Attribute.unchecked),
           ),
@@ -1208,8 +1216,9 @@ class _ListOptionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color =
-        isActive ? theme.colorScheme.primary : theme.colorScheme.onSurface;
+    final color = isActive
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurface;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: ThemeSpacing.xs / 2),
@@ -1235,8 +1244,7 @@ class _ListOptionRow extends StatelessWidget {
                     label,
                     style: theme.textTheme.bodyLarge?.copyWith(
                       color: color,
-                      fontWeight:
-                          isActive ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                     ),
                   ),
                 ),
@@ -1431,10 +1439,7 @@ class _FontColorPanel extends StatefulWidget {
   final quill.QuillController controller;
   final bool isHighlight;
 
-  const _FontColorPanel({
-    required this.controller,
-    this.isHighlight = false,
-  });
+  const _FontColorPanel({required this.controller, this.isHighlight = false});
 
   @override
   State<_FontColorPanel> createState() => _FontColorPanelState();
@@ -1452,8 +1457,9 @@ class _FontColorPanelState extends State<_FontColorPanel> {
   }
 
   void _clear() {
-    final attribute =
-        widget.isHighlight ? quill.Attribute.background : quill.Attribute.color;
+    final attribute = widget.isHighlight
+        ? quill.Attribute.background
+        : quill.Attribute.color;
     widget.controller.formatSelection(quill.Attribute.clone(attribute, null));
   }
 
@@ -1519,10 +1525,7 @@ class DividerEmbedBuilder extends quill.EmbedBuilder {
   String get key => DividerEmbed.dividerType;
 
   @override
-  Widget build(
-    BuildContext context,
-    quill.EmbedContext embedContext,
-  ) {
+  Widget build(BuildContext context, quill.EmbedContext embedContext) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Divider(
