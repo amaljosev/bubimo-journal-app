@@ -12,6 +12,7 @@ import 'package:get_it/get_it.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../database/app_database.dart';
+import '../network/network_info.dart';
 import '../storage/media_storage_service.dart';
 
 // diary_entry
@@ -143,6 +144,13 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<MediaStorageService>(
     () => const MediaStorageService(),
   );
+
+  // Single app-wide connectivity checker — shared by cloud backup
+  // (this milestone) and, next, Google Fonts fetching and the
+  // Supabase-backed stickers/backgrounds pickers. See NetworkInfo's
+  // doc comment for why a real reachability check (not just device
+  // radio state) is used.
+  getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl());
 
   // --- diary_entry ---
   getIt.registerLazySingleton<DiaryLocalDataSource>(
@@ -382,6 +390,7 @@ Future<void> configureDependencies() async {
       driveDataSource: getIt<GoogleDriveDataSource>(),
       backupLocalDataSource: getIt<BackupLocalDataSource>(),
       localDataSource: getIt<CloudBackupLocalDataSource>(),
+      networkInfo: getIt<NetworkInfo>(),
     ),
   );
   // Factory — fresh per visit, same reasoning as BackupBloc: a stale

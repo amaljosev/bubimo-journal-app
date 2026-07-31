@@ -122,3 +122,18 @@ final class CloudBackupFailure extends Failure {
 class ContactFailure extends Failure {
   const ContactFailure(super.message);
 }
+
+/// The device has no real internet access right now. Mirrors
+/// [NoInternetException] — shared across every feature that needs a
+/// connectivity check before doing network work (cloud backup/
+/// restore, Google Fonts fetching, Supabase-backed stickers/
+/// backgrounds), rather than one Failure subtype per feature. The
+/// presentation layer decides how to surface this per screen: cloud
+/// backup uses it to gate navigation to a dedicated no-internet
+/// screen, while the lighter-weight sticker/background/font sheets
+/// just show it in a SnackBar.
+final class NoInternetFailure extends Failure {
+  const NoInternetFailure([
+    super.message = 'No internet connection.',
+  ]);
+}

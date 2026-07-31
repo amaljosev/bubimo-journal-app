@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../core/di/injection.dart';
+import '../../../../../core/network/network_info.dart';
+import '../../../../../core/widgets/needs_internet_inline.dart';
 import '../../bloc/sticker_picker/sticker_picker_bloc.dart';
 
 /// Opens the sticker picker bottom sheet and returns the URL of the
@@ -18,20 +20,104 @@ import '../../bloc/sticker_picker/sticker_picker_bloc.dart';
 /// (diary_form_page) owns what happens next (downloading + placing the
 /// sticker as an overlay) — this function's only job is presenting the
 /// picker UI and returning a selection.
+///
+/// Gates on connectivity before ever dispatching the Supabase category
+/// fetch: `_StickerPickerSheetState` checks `NetworkInfo` first and
+/// shows `NeedsInternetInline` in place of the picker if there's none,
+/// with its own retry — the bloc's own `categoriesError` state (below)
+/// stays as a second layer for a fetch that starts fine but fails
+/// mid-flight (rate limit, Supabase outage, connection dropping
+/// between the gate check and the fetch actually completing).
 Future<String?> showStickerPickerSheet(BuildContext context) {
   return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
-    builder: (sheetContext) => BlocProvider(
-      create: (_) =>
-          getIt<StickerPickerBloc>()..add(const StickerPickerRequested()),
-      child: const _StickerPickerSheet(),
-    ),
+    builder: (sheetContext) => const _StickerPickerSheet(),
   );
 }
 
-class _StickerPickerSheet extends StatelessWidget {
+class _StickerPickerSheet extends StatefulWidget {
   const _StickerPickerSheet();
+
+  @override
+  State<_StickerPickerSheet> createState() => _StickerPickerSheetState();
+}
+
+class _StickerPickerSheetState extends State<_StickerPickerSheet> {
+  final NetworkInfo _networkInfo = getIt<NetworkInfo>();
+
+  /// Null while the first connectivity check is still running; true/
+  /// false once known. Checked BEFORE the bloc is even created, so an
+  /// offline visit never fires the Supabase category fetch at all —
+  /// same reasoning as `CloudBackupGate` checking before building the
+  /// real cloud backup screen, just for a sheet instead of a route.
+  bool? _hasInternet;
+  bool _isRetrying = false;
+
+  StickerPickerBloc? _bloc;
+
+  @override
+  void initState() {
+    super.initState();
+    _check(initial: true);
+  }
+
+  @override
+  void dispose() {
+    _bloc?.close();
+    super.dispose();
+  }
+
+  Future<void> _check({bool initial = false}) async {
+    setState(() => _isRetrying = !initial);
+
+    final hasInternet = await _networkInfo.isConnected;
+    if (!mounted) return;
+
+    setState(() {
+      _hasInternet = hasInternet;
+      _isRetrying = false;
+    });
+
+    if (hasInternet && _bloc == null) {
+      _bloc = getIt<StickerPickerBloc>()
+        ..add(const StickerPickerRequested());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasInternet == null) {
+      return const SafeArea(
+        child: SizedBox(
+          height: 200,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    if (!_hasInternet!) {
+      return SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.5,
+          child: NeedsInternetInline(
+            action: 'browse stickers',
+            isRetrying: _isRetrying,
+            onRetry: () => _check(),
+          ),
+        ),
+      );
+    }
+
+    return BlocProvider.value(
+      value: _bloc!,
+      child: const _StickerPickerContent(),
+    );
+  }
+}
+
+class _StickerPickerContent extends StatelessWidget {
+  const _StickerPickerContent();
 
   @override
   Widget build(BuildContext context) {
@@ -55,23 +141,47 @@ class _StickerPickerSheet extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: theme.colorScheme.error,
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: 0.08,
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.cloud_off_rounded,
+                        size: 34,
+                        color: theme.colorScheme.primary,
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 18),
                     Text(
-                      'Please check your internet connection, or try again',
+                      'No internet connection',
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.onSurface,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    FilledButton.tonal(
+                    const SizedBox(height: 8),
+                    Text(
+                      'You need an internet connection to browse '
+                      'stickers.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton.tonalIcon(
                       onPressed: () => context.read<StickerPickerBloc>().add(
                         const StickerPickerRetried(),
                       ),
-                      child: const Text('Try again'),
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Try again'),
                     ),
                   ],
                 ),

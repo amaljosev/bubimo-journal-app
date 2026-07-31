@@ -2,7 +2,6 @@
 
 part of 'onboarding_bloc.dart';
 
-
 class OnboardingState extends Equatable {
   /// Fractional scroll position across all pages (e.g. 1.35), used to
   /// interpolate the background gradient smoothly as the user drags.

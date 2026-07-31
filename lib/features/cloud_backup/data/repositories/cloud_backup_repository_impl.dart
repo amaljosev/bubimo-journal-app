@@ -4,6 +4,7 @@ import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
+import '../../../../core/network/network_info.dart';
 import '../../../backup/data/datasources/backup_local_data_source.dart';
 import '../../domain/entities/cloud_backup_metadata.dart';
 import '../../domain/repositories/cloud_backup_repository.dart';
@@ -38,25 +39,48 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   final GoogleDriveDataSource driveDataSource;
   final BackupLocalDataSource backupLocalDataSource;
   final CloudBackupLocalDataSource localDataSource;
+  final NetworkInfo networkInfo;
 
   const CloudBackupRepositoryImpl({
     required this.authDataSource,
     required this.driveDataSource,
     required this.backupLocalDataSource,
     required this.localDataSource,
+    required this.networkInfo,
   });
+
+  /// Throws [NoInternetException] if there's no real internet access
+  /// right now. Called at the top of every method here that talks to
+  /// Google (sign-in, Drive reads/writes) — NOT [restoreSession],
+  /// which must stay reachable offline so a previously-linked account
+  /// still shows as signed in while offline (see its own doc comment).
+  ///
+  /// This exists as defense-in-depth alongside the presentation-layer
+  /// gate ([CloudBackupGate]/`no_internet_page.dart`) that keeps the
+  /// user from reaching this screen at all while offline: that gate
+  /// only checks once, on navigation, so it can't catch the connection
+  /// dropping mid-operation (e.g. mid-upload) — this check catches
+  /// that case and produces the same [NoInternetFailure] either way.
+  Future<void> _requireInternet() async {
+    if (!await networkInfo.isConnected) {
+      throw const NoInternetException();
+    }
+  }
 
   // ── Auth ──────────────────────────────────────────────────────────
 
   @override
   Future<Either<Failure, String>> signIn() async {
     try {
+      await _requireInternet();
       await authDataSource.signIn();
       final email = authDataSource.currentAccountEmail;
       if (email != null) {
         await localDataSource.saveEmail(email);
       }
       return Right(email ?? '');
+    } on NoInternetException catch (e) {
+      return Left(NoInternetFailure(e.message));
     } on AuthCancelledException catch (e) {
       return Left(AuthCancelledFailure(e.message));
     } on AuthException catch (e) {
@@ -99,9 +123,12 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   @override
   Future<Either<Failure, void>> signOut() async {
     try {
+      await _requireInternet();
       await authDataSource.signOut();
       await localDataSource.clear();
       return const Right(null);
+    } on NoInternetException catch (e) {
+      return Left(NoInternetFailure(e.message));
     } on AuthException catch (e) {
       return Left(AuthFailure(e.message));
     } catch (e) {
@@ -116,6 +143,7 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
     CloudBackupProgressCallback? onProgress,
   }) async {
     try {
+      await _requireInternet();
       onProgress?.call(CloudBackupPhase.buildingArchive);
       final archive = await backupLocalDataSource.buildBackupArchive();
 
@@ -147,6 +175,8 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
       );
 
       return Right(CloudBackupManifestModel.fromDriveFile(uploaded));
+    } on NoInternetException catch (e) {
+      return Left(NoInternetFailure(e.message));
     } on AuthExpiredException catch (e) {
       return Left(AuthExpiredFailure(e.message));
     } on AuthCancelledException catch (e) {
@@ -165,9 +195,12 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   @override
   Future<Either<Failure, CloudBackupMetadata?>> getCloudBackupStatus() async {
     try {
+      await _requireInternet();
       final file = await driveDataSource.findCurrentBackupFile();
       if (file == null) return const Right(null);
       return Right(CloudBackupManifestModel.fromDriveFile(file));
+    } on NoInternetException catch (e) {
+      return Left(NoInternetFailure(e.message));
     } on AuthExpiredException catch (e) {
       return Left(AuthExpiredFailure(e.message));
     } on AuthException catch (e) {
@@ -186,6 +219,7 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
     CloudBackupProgressCallback? onProgress,
   }) async {
     try {
+      await _requireInternet();
       final file = await driveDataSource.findCurrentBackupFile();
       final fileId = file?.id;
       if (fileId == null) {
@@ -201,6 +235,8 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
       final result = await backupLocalDataSource.importBackupFromBytes(bytes);
 
       return Right(result.importedCount);
+    } on NoInternetException catch (e) {
+      return Left(NoInternetFailure(e.message));
     } on AuthExpiredException catch (e) {
       return Left(AuthExpiredFailure(e.message));
     } on AuthCancelledException catch (e) {
@@ -223,11 +259,14 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
   @override
   Future<Either<Failure, void>> deleteCloudBackup() async {
     try {
+      await _requireInternet();
       final file = await driveDataSource.findCurrentBackupFile();
       final fileId = file?.id;
       if (fileId == null) return const Right(null); // nothing to delete
       await driveDataSource.deleteFile(fileId);
       return const Right(null);
+    } on NoInternetException catch (e) {
+      return Left(NoInternetFailure(e.message));
     } on AuthExpiredException catch (e) {
       return Left(AuthExpiredFailure(e.message));
     } on AuthException catch (e) {

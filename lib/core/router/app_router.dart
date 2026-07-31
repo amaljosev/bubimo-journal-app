@@ -16,7 +16,7 @@ import '../../../features/app_lock/presentation/pages/security_question_page.dar
 import '../../../features/app_lock/presentation/routing/app_lock_route_paths.dart';
 import '../../../features/app_lock/presentation/routing/lock_redirect.dart';
 import '../../../features/backup/presentation/pages/backup_restore_page.dart';
-import '../../../features/cloud_backup/presentation/pages/cloud_backup_page.dart';
+import '../../../features/cloud_backup/presentation/pages/cloud_backup_gate.dart';
 import '../../../features/diary_entry/presentation/pages/diary_entry_view_page.dart';
 import '../../../features/diary_entry/presentation/pages/diary_form_page.dart';
 import '../../../features/favorites/presentation/pages/favorites_page.dart';
@@ -260,9 +260,14 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: AppRoutes.cloudBackup,
-      // Same reasoning as AppRoutes.importExport just above —
-      // CloudBackupPage provides its own CloudBackupBloc internally.
-      builder: (context, state) => const CloudBackupPage(),
+      // Routes to CloudBackupGate, not CloudBackupPage directly —
+      // the gate checks real internet access first and only builds
+      // CloudBackupPage (which provides its own CloudBackupBloc
+      // internally, same reasoning as AppRoutes.importExport above)
+      // once connectivity is confirmed; otherwise it shows
+      // NoInternetPage in its place. See CloudBackupGate's doc
+      // comment.
+      builder: (context, state) => const CloudBackupGate(),
     ),
     GoRoute(
       path: AppRoutes.appLockSettings,

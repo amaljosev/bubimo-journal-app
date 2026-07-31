@@ -10,7 +10,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/network/network_info.dart';
 import '../../../../core/storage/media_storage_service.dart';
+import '../../../../core/widgets/needs_internet_inline.dart';
 import '../bloc/background_picker/background_picker_bloc.dart';
 import '../bloc/background_picker/background_picker_event.dart';
 import '../bloc/background_picker/background_picker_state.dart';
@@ -146,12 +148,66 @@ class _PresetsTab extends StatefulWidget {
 
 class _PresetsTabState extends State<_PresetsTab>
     with AutomaticKeepAliveClientMixin {
+  final NetworkInfo _networkInfo = getIt<NetworkInfo>();
+
+  /// Null while the first connectivity check is still running; true/
+  /// false once known. Checked once per tab visit, alongside (not
+  /// instead of) the bloc's own `LoadBackgrounds` dispatch — this
+  /// only decides which UI to show; `BackgroundPickerBloc` still owns
+  /// the actual fetch and its own `remoteFetchFailed` state covers a
+  /// fetch that starts fine but fails mid-flight.
+  bool? _hasInternet;
+  bool _isRetrying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check(initial: true);
+  }
+
+  Future<void> _check({bool initial = false}) async {
+    setState(() => _isRetrying = !initial);
+
+    final hasInternet = await _networkInfo.isConnected;
+    if (!mounted) return;
+
+    setState(() {
+      _hasInternet = hasInternet;
+      _isRetrying = false;
+    });
+
+    if (hasInternet && !initial) {
+      // Retried from offline back to online — (re)kick the fetch, since
+      // the very first load already happened via LoadBackgrounds in
+      // BackgroundPickerWidget.build regardless of connectivity.
+      context.read<BackgroundPickerBloc>().add(const LoadBackgrounds());
+    }
+  }
+
   @override
   bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
+
+    if (_hasInternet == null) {
+      return const Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
+    if (!_hasInternet!) {
+      return NeedsInternetInline(
+        action: 'load background presets',
+        isRetrying: _isRetrying,
+        onRetry: () => _check(),
+      );
+    }
 
     return BlocBuilder<BackgroundPickerBloc, BackgroundPickerState>(
       builder: (context, state) {
@@ -172,9 +228,25 @@ class _PresetsTabState extends State<_PresetsTab>
                 ),
               )
             else if (state.remoteFetchFailed)
-              Text(
-                'Couldn\'t load more backgrounds — check your connection.',
-                style: Theme.of(context).textTheme.bodySmall,
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Column(
+                  children: [
+                    Text(
+                      "Couldn't load more backgrounds — check your "
+                      'connection.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => context.read<BackgroundPickerBloc>().add(
+                        const LoadBackgrounds(),
+                      ),
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
               )
             else if (state.remotePresets.isEmpty)
               Text(

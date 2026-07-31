@@ -1,13 +1,12 @@
 // lib/features/onboarding/presentation/pages/onboarding_page.dart
 
-import 'package:bubimo/features/onboarding/widgets/onboarding_pages_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../widgets/onboarding_dots.dart';
 import '../../widgets/onboarding_page_view_item.dart';
+import '../../widgets/onboarding_pages_data.dart';
 import '../bloc/onboarding_bloc.dart';
 
 
@@ -98,7 +97,7 @@ class _OnboardingViewState extends State<_OnboardingView> {
   /// build() below), so this is never reachable from page 2 or 3.
   void _goToSecondPage() {
     _pageController.animateToPage(
-      2,
+      1,
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOutCubic,
     );

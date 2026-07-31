@@ -35,7 +35,12 @@ final class OnboardingPageSettled extends OnboardingEvent {
   List<Object?> get props => [index];
 }
 
-/// Fired by "Skip" or the final page's "Get started" button.
+/// Fired only by the final page's "Get started" button. There is no
+/// "skip past everything" control — "Skip" (shown only on the first
+/// page) calls `PageController.animateToPage(1, ...)` directly rather
+/// than dispatching any event here; that page transition then
+/// triggers [OnboardingPageSettled] on its own once it settles, the
+/// same as any other swipe. See `OnboardingPage`/`_goToSecondPage`.
 final class OnboardingCompleted extends OnboardingEvent {
   const OnboardingCompleted();
 }

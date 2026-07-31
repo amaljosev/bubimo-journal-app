@@ -3,6 +3,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../../core/di/injection.dart';
+import '../../../../core/network/network_info.dart';
+import '../../../../core/widgets/needs_internet_inline.dart';
+
 /// A single selectable font option: a display label and a function
 /// that builds its Google Fonts TextStyle (used both for the tile
 /// preview and to resolve the actual font family string).
@@ -118,6 +122,30 @@ class _FontPickerState extends State<FontPicker> {
   late final ValueNotifier<String?> _selectedFamily =
       ValueNotifier<String?>(widget.selectedFontFamily);
 
+  /// Checked once when the panel opens (fonts are typically browsed
+  /// for a few seconds, not left open — a live connectivity stream
+  /// would be overkill here). `null` fetches use whatever's already
+  /// been fetched-and-cached by `google_fonts` in a previous session,
+  /// so this never blocks the list the way the sticker/background
+  /// pickers' full-body gate does — it only warns that fonts NOT
+  /// already cached won't render their real typeface until back
+  /// online (Flutter falls back to the platform default silently
+  /// otherwise, which reads as "the font just didn't apply" rather
+  /// than explaining why).
+  bool _isOffline = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConnectivity();
+  }
+
+  Future<void> _checkConnectivity() async {
+    final hasInternet = await getIt<NetworkInfo>().isConnected;
+    if (!mounted) return;
+    setState(() => _isOffline = !hasInternet);
+  }
+
   @override
   void didUpdateWidget(covariant FontPicker oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -162,6 +190,12 @@ class _FontPickerState extends State<FontPicker> {
             ),
           ),
         ),
+        if (_isOffline)
+          const NeedsInternetBanner(
+            message:
+                "You're offline — fonts you haven't used before won't "
+                'load until you reconnect. Already-used fonts still work.',
+          ),
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),

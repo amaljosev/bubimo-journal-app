@@ -113,3 +113,24 @@ class AuthExpiredException extends AppException {
 class CloudBackupException extends AppException {
   const CloudBackupException({required super.message});
 }
+
+/// Thrown by any feature that requires real internet access (Google
+/// Drive cloud backup/restore, Google Fonts fetching, Supabase-backed
+/// stickers/backgrounds) when [NetworkInfo.isConnected] is false right
+/// before the network call would otherwise be made.
+///
+/// Deliberately ONE shared exception type across all of those
+/// features rather than a separate no-connection exception per
+/// feature — lack of internet is the same condition and the same
+/// user-facing message regardless of which network call was about to
+/// happen, so a single type (mapped to the single [NoInternetFailure]
+/// below) avoids pointless duplication. Callers that need
+/// feature-specific handling on top of this (e.g. the cloud backup
+/// gate screen vs. a stickers sheet's SnackBar) branch on how they
+/// catch/map it, not on having a different exception class per
+/// feature.
+class NoInternetException extends AppException {
+  const NoInternetException({
+    super.message = 'No internet connection.',
+  });
+}
