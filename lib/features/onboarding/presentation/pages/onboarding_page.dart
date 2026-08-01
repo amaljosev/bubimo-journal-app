@@ -1,5 +1,6 @@
 // lib/features/onboarding/presentation/pages/onboarding_page.dart
 
+import 'package:bubimo/features/onboarding/widgets/onboarding_mesh_background.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/di/injection.dart';
@@ -27,9 +28,9 @@ import '../bloc/onboarding_bloc.dart';
 /// page rather than completing onboarding; see `_goToSecondPage`.
 class OnboardingPage extends StatelessWidget {
   final VoidCallback onCompleted;
-
+ 
   const OnboardingPage({super.key, required this.onCompleted});
-
+ 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
@@ -42,17 +43,17 @@ class OnboardingPage extends StatelessWidget {
     );
   }
 }
-
+ 
 class _OnboardingView extends StatefulWidget {
   const _OnboardingView();
-
+ 
   @override
   State<_OnboardingView> createState() => _OnboardingViewState();
 }
-
+ 
 class _OnboardingViewState extends State<_OnboardingView> {
   late final PageController _pageController;
-
+ 
   @override
   void initState() {
     super.initState();
@@ -64,7 +65,7 @@ class _OnboardingViewState extends State<_OnboardingView> {
     // the bloc for the gradient interpolation in build() below.
     _pageController.addListener(_onScrollChanged);
   }
-
+ 
   void _onScrollChanged() {
     if (!_pageController.hasClients) return;
     final page = _pageController.page;
@@ -72,14 +73,14 @@ class _OnboardingViewState extends State<_OnboardingView> {
       context.read<OnboardingBloc>().add(OnboardingPageScrolled(page));
     }
   }
-
+ 
   @override
   void dispose() {
     _pageController.removeListener(_onScrollChanged);
     _pageController.dispose();
     super.dispose();
   }
-
+ 
   void _goToNextOrComplete(int currentPage) {
     if (currentPage == kOnboardingPages.length - 1) {
       context.read<OnboardingBloc>().add(const OnboardingCompleted());
@@ -90,7 +91,7 @@ class _OnboardingViewState extends State<_OnboardingView> {
       curve: Curves.easeOutCubic,
     );
   }
-
+ 
   /// "Skip" always lands on the second page (index 1) — it's a
   /// shortcut past the first page specifically, not a general escape
   /// from onboarding. Only shown while `currentPage == 0` (see
@@ -102,22 +103,22 @@ class _OnboardingViewState extends State<_OnboardingView> {
       curve: Curves.easeOutCubic,
     );
   }
-
+ 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mutedTextColor =
         (isDark ? AppColors.textDark : AppColors.textLight)[4].toColor();
-
+ 
     return Scaffold(
       body: BlocBuilder<OnboardingBloc, OnboardingState>(
         builder: (context, state) {
-          final canSkip = state.currentPage == 0||state.currentPage == 1;
+          final canSkip = state.currentPage == 0||state.currentPage==1;
           final isLastPage = state.currentPage == kOnboardingPages.length - 1;
-
+ 
           return Stack(
             children: [
-              _OnboardingBackground(scrollPosition: state.scrollPosition, isDark: isDark),
+              OnboardingMeshBackground(scrollPosition: state.scrollPosition, isDark: isDark),
               SafeArea(
                 child: Column(
                   children: [
@@ -151,7 +152,11 @@ class _OnboardingViewState extends State<_OnboardingView> {
                           OnboardingPageSettled(index),
                         ),
                         children: [
-                          for (final page in kOnboardingPages) OnboardingPageViewItem(data: page),
+                          for (var i = 0; i < kOnboardingPages.length; i++)
+                            OnboardingPageViewItem(
+                              data: kOnboardingPages[i],
+                              // isActive: state.currentPage == i,
+                            ),
                         ],
                       ),
                     ),
@@ -173,66 +178,18 @@ class _OnboardingViewState extends State<_OnboardingView> {
     );
   }
 }
-
-/// Background gradient that smoothly cross-fades between each page's
-/// accent tint as [scrollPosition] moves — tied directly to drag
-/// position (not just the settled page) so the color shift feels
-/// continuous under the user's thumb, not like a slide transition
-/// with a color cut hidden inside it. This is the flow's one
-/// deliberate signature animation; everything else (dots, hero
-/// breathing, button fade) stays quieter by comparison.
-class _OnboardingBackground extends StatelessWidget {
-  final double scrollPosition;
-  final bool isDark;
-
-  const _OnboardingBackground({required this.scrollPosition, required this.isDark});
-
-  @override
-  Widget build(BuildContext context) {
-    final pageCount = kOnboardingPages.length;
-    final clamped = scrollPosition.clamp(0.0, (pageCount - 1).toDouble());
-    final lowerIndex = clamped.floor();
-    final upperIndex = (lowerIndex + 1).clamp(0, pageCount - 1);
-    final t = clamped - lowerIndex;
-
-    final background =
-        (isDark ? AppColors.backgroundDark : AppColors.backgroundLight)[0].toColor();
-
-    final lowerAccent = kOnboardingPages[lowerIndex].accentIndex;
-    final upperAccent = kOnboardingPages[upperIndex].accentIndex;
-
-    final lowerTint = AppColors.onboardingGradientForPrimary(lowerAccent, isDark: isDark).toColor();
-    final upperTint = AppColors.onboardingGradientForPrimary(upperAccent, isDark: isDark).toColor();
-    final tint = Color.lerp(lowerTint, upperTint, t)!;
-
-    return Positioned.fill(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [tint, background],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Bottom row: dot indicator + the "Next" / "Get started" button,
-/// whose label and action swap on the last page rather than needing
-/// a separate button hierarchy per page.
+ 
 class _OnboardingControls extends StatelessWidget {
   final int currentPage;
   final bool isLastPage;
   final VoidCallback onNext;
-
+ 
   const _OnboardingControls({
     required this.currentPage,
     required this.isLastPage,
     required this.onNext,
   });
-
+ 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -247,7 +204,7 @@ class _OnboardingControls extends StatelessWidget {
     // "Primary" doc comment), so a consistent near-white label reads
     // clearly on either.
     final onAccent = AppColors.surfaceLight[0].toColor();
-
+ 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -274,3 +231,4 @@ class _OnboardingControls extends StatelessWidget {
     );
   }
 }
+ 
