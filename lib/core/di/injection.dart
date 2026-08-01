@@ -14,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../database/app_database.dart';
 import '../network/network_info.dart';
 import '../storage/media_storage_service.dart';
+import '../theme/font/safe_font_service.dart';
 
 // diary_entry
 import '../../features/diary_entry/data/datasources/diary_local_data_source.dart';
@@ -145,12 +146,23 @@ Future<void> configureDependencies() async {
     () => const MediaStorageService(),
   );
 
-  // Single app-wide connectivity checker — shared by cloud backup
-  // (this milestone) and, next, Google Fonts fetching and the
-  // Supabase-backed stickers/backgrounds pickers. See NetworkInfo's
-  // doc comment for why a real reachability check (not just device
-  // radio state) is used.
+  // Single app-wide connectivity checker — shared by cloud backup,
+  // Google Fonts fetching (SafeFontService, just below), and, next,
+  // the Supabase-backed stickers/backgrounds pickers. See
+  // NetworkInfo's doc comment for why a real reachability check (not
+  // just device radio state) is used.
   getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl());
+
+  // Owns every Google Font this app touches — built-in theme fonts
+  // and the shared GoogleFontsCatalog (custom-theme Font Picker AND
+  // the rich-text editor's font picker). Lazy singleton (not a
+  // factory): its in-memory "known-good fonts" registry and its
+  // background retry timer both need to persist for the app's entire
+  // lifetime, same reasoning as AppThemeCubit just below. See
+  // SafeFontService's doc comment for why this exists.
+  getIt.registerLazySingleton(
+    () => SafeFontService(networkInfo: getIt<NetworkInfo>()),
+  );
 
   // --- diary_entry ---
   getIt.registerLazySingleton<DiaryLocalDataSource>(
@@ -273,6 +285,7 @@ Future<void> configureDependencies() async {
       getSelectedTheme: getIt<GetSelectedTheme>(),
       selectTheme: getIt<SelectTheme>(),
       resetToDefaultTheme: getIt<ResetToDefaultTheme>(),
+      fontService: getIt<SafeFontService>(),
     ),
   );
 

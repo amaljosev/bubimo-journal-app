@@ -1,10 +1,10 @@
 // lib/core/theme/theme_mapper.dart
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../features/theme/domain/entities/app_theme_data.dart';
 import 'background_image_theme_extension.dart';
+import 'font/safe_font_service.dart';
 import 'theme_data_builder.dart';
 
 /// Converts a domain [AppThemeData] into a Flutter [ThemeData].
@@ -58,15 +58,21 @@ import 'theme_data_builder.dart';
 /// this is what [Brightness] is set from here.
 ///
 /// [AppThemeData.fontFamily] is a Google Fonts family name applied
-/// across the entire generated `TextTheme` via `GoogleFonts.getTextTheme`
-/// — every text style (headings through body) uses the theme's font.
-/// `GoogleFonts.getTextTheme` also fetches/caches the font at runtime,
-/// so no font asset bundling or pubspec registration is needed per font.
+/// across the entire generated `TextTheme` — every text style
+/// (headings through body) uses the theme's font. Resolution goes
+/// through [fontService] (see [SafeFontService]) rather than calling
+/// `GoogleFonts.getTextTheme` directly: `google_fonts` fetches over
+/// HTTP the first time a family is used, on a detached Future this
+/// call site has no handle on, so a plain try/catch here can't
+/// protect against an offline failure — [SafeFontService] only ever
+/// calls into `google_fonts` for a family it has already confirmed is
+/// cached, and falls back to the system font instead of guessing
+/// otherwise. See that class's doc comment for the full reasoning.
 ///
 /// The rest of the `ThemeData` shape (card/appBar/input decoration
 /// shapes) is shared with `AppTheme` via [ThemeDataBuilder] so the two
 /// theme-construction paths can't drift apart.
-ThemeData buildThemeData(AppThemeData theme) {
+ThemeData buildThemeData(AppThemeData theme, SafeFontService fontService) {
   final primaryColor = theme.primaryColor.toColor();
   final secondaryColor = theme.secondaryColor.toColor();
   final surfaceColor = theme.surfaceColor.toColor();
@@ -151,10 +157,9 @@ ThemeData buildThemeData(AppThemeData theme) {
   final baseTextTheme = brightness == Brightness.dark
       ? ThemeData(brightness: Brightness.dark).textTheme
       : ThemeData(brightness: Brightness.light).textTheme;
-  final themedTextTheme = GoogleFonts.getTextTheme(
-    theme.fontFamily,
-    baseTextTheme,
-  ).apply(bodyColor: textColor, displayColor: textColor);
+  final themedTextTheme = fontService
+      .resolveTextTheme(fontFamily: theme.fontFamily, base: baseTextTheme)
+      .apply(bodyColor: textColor, displayColor: textColor);
 
   return ThemeDataBuilder.build(
     colorScheme: colorScheme,

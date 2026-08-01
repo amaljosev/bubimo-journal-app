@@ -97,7 +97,7 @@ class _OnboardingViewState extends State<_OnboardingView> {
   /// build() below), so this is never reachable from page 2 or 3.
   void _goToSecondPage() {
     _pageController.animateToPage(
-      1,
+      2,
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOutCubic,
     );
@@ -112,7 +112,7 @@ class _OnboardingViewState extends State<_OnboardingView> {
     return Scaffold(
       body: BlocBuilder<OnboardingBloc, OnboardingState>(
         builder: (context, state) {
-          final isFirstPage = state.currentPage == 0;
+          final canSkip = state.currentPage == 0||state.currentPage == 1;
           final isLastPage = state.currentPage == kOnboardingPages.length - 1;
 
           return Stack(
@@ -133,9 +133,9 @@ class _OnboardingViewState extends State<_OnboardingView> {
                         // but confusing.
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 200),
-                          opacity: isFirstPage ? 1.0 : 0.0,
+                          opacity: canSkip ? 1.0 : 0.0,
                           child: IgnorePointer(
-                            ignoring: !isFirstPage,
+                            ignoring: !canSkip,
                             child: TextButton(
                               onPressed: _goToSecondPage,
                               child: Text('Skip', style: TextStyle(color: mutedTextColor)),

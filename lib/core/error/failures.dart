@@ -137,3 +137,15 @@ final class NoInternetFailure extends Failure {
     super.message = 'No internet connection.',
   ]);
 }
+
+/// A specific font (a built-in theme's font, or a custom-theme Google
+/// Font pick) was actually attempted and failed to download or cache.
+/// Mirrors [FontDownloadException]. Kept as one type carrying a
+/// specific message rather than one subclass per failure cause,
+/// consistent with [CloudBackupFailure]'s reasoning above — the
+/// presentation layer only ever displays the message.
+final class FontDownloadFailure extends Failure {
+  const FontDownloadFailure([
+    super.message = 'Could not download this font. Using the default font for now.',
+  ]);
+}

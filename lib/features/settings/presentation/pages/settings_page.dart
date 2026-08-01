@@ -1,6 +1,7 @@
 // lib/features/settings/presentation/pages/settings_page.dart
 
 import 'package:bubimo/core/constants/app_constants.dart';
+import 'package:bubimo/core/network/internet_gate.dart';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/core/utils/url_launcher_helper.dart';
 import 'package:bubimo/features/contact_us/presentation/widgets/contact_us_sheet.dart';
@@ -90,10 +91,17 @@ class SettingsPage extends StatelessWidget {
                 SettingsListItem(
                   icon: Icons.privacy_tip_outlined,
                   label: 'Privacy Policy',
-                  onTap: () => UrlLauncherHelper.launchUrlString(
+                  onTap: () => InternetGate.run(
                     context,
-                    AppConstants.privacyPolicyUrl,
-                    LaunchMode.inAppWebView,
+                    title: 'Privacy Policy',
+                    message:
+                        'You need an internet connection to view the '
+                        'privacy policy.',
+                    action: () => UrlLauncherHelper.launchUrlString(
+                      context,
+                      AppConstants.privacyPolicyUrl,
+                      LaunchMode.inAppWebView,
+                    ),
                   ),
                 ),
                 SettingsListItem(

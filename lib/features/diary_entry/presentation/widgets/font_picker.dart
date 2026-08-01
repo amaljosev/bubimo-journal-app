@@ -1,89 +1,46 @@
-// lib/features/rich_editor/presentation/widgets/font_picker.dart
+// lib/features/diary_entry/presentation/widgets/font_picker.dart
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/di/injection.dart';
-import '../../../../core/network/network_info.dart';
+import '../../../../core/theme/font/safe_font_service.dart';
+import '../../../../core/theme/google_fonts_catalog.dart';
 import '../../../../core/widgets/needs_internet_inline.dart';
 
-/// A single selectable font option: a display label and a function
-/// that builds its Google Fonts TextStyle (used both for the tile
-/// preview and to resolve the actual font family string).
+/// A single selectable font option: a display label and the resolved
+/// Google Fonts family name — `null` means "Default" (no font
+/// override; the entry's text renders in whatever the surrounding
+/// theme/style already provides).
 class _FontOption {
   final String label;
-  final TextStyle Function() styleBuilder;
+  final String? fontFamily;
 
-  const _FontOption(this.label, this.styleBuilder);
+  const _FontOption(this.label, this.fontFamily);
 }
 
-/// Font options offered to the user, backed by `google_fonts` — no
-/// bundled font assets or `flutter: fonts:` pubspec entries needed.
-/// Fonts are fetched on first use and cached by the package afterward;
-/// the very first render of each font may require a brief network
-/// fetch (falls back to the default font if offline and not yet
-/// cached).
+/// Font options offered to the user: 'Default' (no override) followed
+/// by every family in [GoogleFontsCatalog] — the same list the
+/// custom-theme Font Picker draws from, so a font available in one
+/// picker is available in the other. Previews are resolved through
+/// [SafeFontService.resolveTextStyle], not `GoogleFonts` directly —
+/// this list used to hold its own curated subset with a
+/// `GoogleFonts.<family>()` accessor call baked into each entry, which
+/// meant opening this sheet built several live font previews at once,
+/// each one an unhandled-exception risk if that family wasn't cached
+/// and the device was offline (google_fonts fetches over HTTP on a
+/// detached Future nothing here could catch). Routing through
+/// [SafeFontService] instead means an uncached family just renders in
+/// the system font until it's available.
 ///
 /// Kept as a single flat list (no category grouping) — the redesigned
 /// picker favors a short, scannable list over a filterable grid, so
 /// there's no tab row spending vertical space on a sheet that's meant
 /// to feel lightweight.
 final List<_FontOption> _fontOptions = [
-  _FontOption('Default', () => const TextStyle()),
-
-  // ── Handwriting / script — personal, diary-like ──────────────────
-  _FontOption('Caveat', () => GoogleFonts.caveat()),
-  _FontOption('Dancing Script', () => GoogleFonts.dancingScript()),
-  _FontOption('Kalam', () => GoogleFonts.kalam()),
-  _FontOption('Shadows Into Light', () => GoogleFonts.shadowsIntoLight()),
-  _FontOption('Indie Flower', () => GoogleFonts.indieFlower()),
-  _FontOption('Patrick Hand', () => GoogleFonts.patrickHand()),
-  _FontOption('Satisfy', () => GoogleFonts.satisfy()),
-  _FontOption('Sacramento', () => GoogleFonts.sacramento()),
-  _FontOption('Great Vibes', () => GoogleFonts.greatVibes()),
-  _FontOption('Homemade Apple', () => GoogleFonts.homemadeApple()),
-  _FontOption('Reenie Beanie', () => GoogleFonts.reenieBeanie()),
-  _FontOption('Amatic SC', () => GoogleFonts.amaticSc()),
-  _FontOption('Caveat Brush', () => GoogleFonts.caveatBrush()),
-
-  // ── Serif — classic, reflective ──────────────────────────────────
-  _FontOption('Merriweather', () => GoogleFonts.merriweather()),
-  _FontOption('Lora', () => GoogleFonts.lora()),
-  _FontOption('Playfair Display', () => GoogleFonts.playfairDisplay()),
-  _FontOption('EB Garamond', () => GoogleFonts.ebGaramond()),
-  _FontOption('Crimson Text', () => GoogleFonts.crimsonText()),
-  _FontOption('Cormorant Garamond', () => GoogleFonts.cormorantGaramond()),
-  _FontOption('PT Serif', () => GoogleFonts.ptSerif()),
-  _FontOption('Libre Baskerville', () => GoogleFonts.libreBaskerville()),
-  _FontOption('Bitter', () => GoogleFonts.bitter()),
-  _FontOption('Spectral', () => GoogleFonts.spectral()),
-
-  // ── Sans-serif — clean, easy everyday reading ────────────────────
-  _FontOption('Nunito', () => GoogleFonts.nunito()),
-  _FontOption('Poppins', () => GoogleFonts.poppins()),
-  _FontOption('Quicksand', () => GoogleFonts.quicksand()),
-  _FontOption('Lato', () => GoogleFonts.lato()),
-  _FontOption('Inter', () => GoogleFonts.inter()),
-  _FontOption('Roboto', () => GoogleFonts.roboto()),
-  _FontOption('Open Sans', () => GoogleFonts.openSans()),
-  _FontOption('Montserrat', () => GoogleFonts.montserrat()),
-  _FontOption('Raleway', () => GoogleFonts.raleway()),
-  _FontOption('Work Sans', () => GoogleFonts.workSans()),
-  _FontOption('Karla', () => GoogleFonts.karla()),
-
-  // ── Playful / display — lighter, expressive entries ──────────────
-  _FontOption('Pacifico', () => GoogleFonts.pacifico()),
-  _FontOption('Comic Neue', () => GoogleFonts.comicNeue()),
-  _FontOption('Fredoka', () => GoogleFonts.fredoka()),
-  _FontOption('Baloo 2', () => GoogleFonts.baloo2()),
-  _FontOption('Righteous', () => GoogleFonts.righteous()),
-  _FontOption('Lobster', () => GoogleFonts.lobster()),
-
-  // ── Monospace — for a typewriter-diary feel ──────────────────────
-  _FontOption('Roboto Mono', () => GoogleFonts.robotoMono()),
-  _FontOption('Space Mono', () => GoogleFonts.spaceMono()),
-  _FontOption('JetBrains Mono', () => GoogleFonts.jetBrainsMono()),
-  _FontOption('Source Code Pro', () => GoogleFonts.sourceCodePro()),
+  const _FontOption('Default', null),
+  for (final family in GoogleFontsCatalog.families) _FontOption(family, family),
 ];
 
 /// Minimal, single-list font picker: a small heading and a scrollable
@@ -124,14 +81,12 @@ class _FontPickerState extends State<FontPicker> {
 
   /// Checked once when the panel opens (fonts are typically browsed
   /// for a few seconds, not left open — a live connectivity stream
-  /// would be overkill here). `null` fetches use whatever's already
-  /// been fetched-and-cached by `google_fonts` in a previous session,
-  /// so this never blocks the list the way the sticker/background
-  /// pickers' full-body gate does — it only warns that fonts NOT
-  /// already cached won't render their real typeface until back
-  /// online (Flutter falls back to the platform default silently
-  /// otherwise, which reads as "the font just didn't apply" rather
-  /// than explaining why).
+  /// would be overkill here). This never blocks the list the way the
+  /// sticker/background pickers' full-body gate does — it only warns
+  /// that fonts NOT already cached won't render their real typeface
+  /// until back online (Flutter falls back to the platform default
+  /// silently otherwise, which reads as "the font just didn't apply"
+  /// rather than explaining why).
   bool _isOffline = false;
 
   @override
@@ -141,7 +96,7 @@ class _FontPickerState extends State<FontPicker> {
   }
 
   Future<void> _checkConnectivity() async {
-    final hasInternet = await getIt<NetworkInfo>().isConnected;
+    final hasInternet = await getIt<SafeFontService>().isOnline;
     if (!mounted) return;
     setState(() => _isOffline = !hasInternet);
   }
@@ -165,11 +120,23 @@ class _FontPickerState extends State<FontPicker> {
     widget.onFontSelected(resolvedFamily);
     // Reassert unfocus after the format operation that may have refocused
     widget.onAfterFormat?.call();
+
+    if (resolvedFamily != null) {
+      // Fire-and-forget: the format already applied instantly using
+      // whatever SafeFontService could resolve right now (cached font
+      // or system fallback). This just gives an uncached pick a real,
+      // awaited attempt to arrive shortly after, rather than only
+      // waiting for the next background precache sweep.
+      unawaited(
+        getIt<SafeFontService>().ensureFontAvailable(resolvedFamily),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontService = getIt<SafeFontService>();
 
     // No outer Container/rounded sheet chrome here — this widget is
     // rendered as an inline panel docked above the toolbar (see
@@ -202,16 +169,20 @@ class _FontPickerState extends State<FontPicker> {
             itemCount: _fontOptions.length,
             itemBuilder: (context, index) {
               final option = _fontOptions[index];
-              final style = option.styleBuilder();
-              final isDefault = option.label == 'Default';
-              final resolvedFamily = isDefault ? null : style.fontFamily;
+              final family = option.fontFamily;
+              final style = family == null
+                  ? const TextStyle()
+                  : fontService.resolveTextStyle(
+                      fontFamily: family,
+                      base: const TextStyle(),
+                    );
 
               return _FontRow(
                 label: option.label,
                 style: style,
-                resolvedFamily: resolvedFamily,
+                resolvedFamily: family,
                 selectedFamily: _selectedFamily,
-                onTap: () => _handleFontTap(resolvedFamily),
+                onTap: () => _handleFontTap(family),
               );
             },
           ),

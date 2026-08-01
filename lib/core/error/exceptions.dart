@@ -134,3 +134,15 @@ class NoInternetException extends AppException {
     super.message = 'No internet connection.',
   });
 }
+
+/// Thrown by [SafeFontService] when a Google Font download was
+/// actually attempted (device believed to be online) and failed — a
+/// transient connectivity blip, a Google Fonts server error, a
+/// corrupted/incomplete response, or a local disk-cache write
+/// failure. Distinct from [NoInternetException], which is thrown
+/// *before* any network attempt, once [NetworkInfo.isConnected] is
+/// already known to be false — this one covers the fetch itself
+/// failing despite a connection appearing to be present.
+class FontDownloadException extends AppException {
+  const FontDownloadException({required super.message});
+}

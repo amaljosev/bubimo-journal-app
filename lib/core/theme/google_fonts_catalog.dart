@@ -1,15 +1,6 @@
 // lib/core/theme/google_fonts_catalog.dart
 
-/// Curated list of ~50 popular Google Fonts family names shown in the
-/// font-selection bottom sheet.
-///
-/// `google_fonts` ships 1400+ families — listing all of them would make
-/// the bottom sheet unusably long and force loading/caching a huge
-/// number of fonts. This curated subset spans serif, sans-serif,
-/// handwriting, monospace, and display categories so users still get a
-/// genuinely wide variety of choices. Family names must exactly match
-/// `GoogleFonts.<family>()` accessor names (PascalCase-to-space
-/// conversion handled by `GoogleFonts.getFont`).
+
 class GoogleFontsCatalog {
   GoogleFontsCatalog._();
 
@@ -22,6 +13,7 @@ class GoogleFontsCatalog {
     'Quicksand',
     'Montserrat',
     'Lato',
+    'Open Sans',
     'Mulish',
     'Rubik',
     'Karla',
@@ -45,21 +37,27 @@ class GoogleFontsCatalog {
     'Cormorant Garamond',
     'Libre Baskerville',
     'Crimson Pro',
+    'Crimson Text',
     'EB Garamond',
-    'Source Serif Pro',
+    'Source Serif 4',
+    'Spectral',
 
     // Handwriting / script
     'Caveat',
     'Dancing Script',
-    'Pacifico',
     'Sacramento',
     'Satisfy',
     'Kalam',
     'Shadows Into Light',
     'Great Vibes',
     'Indie Flower',
+    'Patrick Hand',
+    'Homemade Apple',
+    'Reenie Beanie',
+    'Amatic SC',
+    'Caveat Brush',
 
-    // Display
+    // Display / playful
     'Comfortaa',
     'Righteous',
     'Baloo 2',
@@ -67,12 +65,16 @@ class GoogleFontsCatalog {
     'Bungee',
     'Alfa Slab One',
     'Abril Fatface',
+    'Pacifico',
+    'Comic Neue',
+    'Lobster',
 
     // Monospace
     'JetBrains Mono',
     'Roboto Mono',
     'Space Mono',
     'IBM Plex Mono',
+    'Source Code Pro',
 
     // Rounded / friendly
     'Varela Round',
