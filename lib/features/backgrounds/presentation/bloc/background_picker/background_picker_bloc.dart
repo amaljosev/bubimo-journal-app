@@ -1,5 +1,7 @@
 // lib/features/backgrounds/presentation/bloc/background_picker/background_picker_bloc.dart
 
+import 'dart:developer' as developer;
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../data/datasources/supabase_background_data_source.dart';
@@ -43,24 +45,53 @@ class BackgroundPickerBloc
 
     try {
       final urls = await remoteDataSource.fetchAvailablePackUrls();
+      developer.log(
+        'Fetched ${urls.length} background preset URL(s) from Supabase',
+        name: 'BackgroundPickerBloc',
+      );
 
       final cachedPaths = <String>[];
       for (final url in urls) {
-        final localPath = await remoteDataSource.downloadAndCache(url);
-        cachedPaths.add(localPath);
+        try {
+          cachedPaths.add(await remoteDataSource.downloadAndCache(url));
+        } catch (error, stackTrace) {
+          // Don't let one bad file sink the whole batch — log it and
+          // keep going with the rest.
+          developer.log(
+            'Failed to download/cache background preset: $url',
+            name: 'BackgroundPickerBloc',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
       }
+
+      // If there were URLs to work with but none of them ended up
+      // cached, that's a systemic problem (bucket/folder misconfig,
+      // permissions, etc.) rather than "there just aren't any
+      // presets" — surface it as a failure so the retry affordance
+      // shows instead of a silently-empty grid.
+      final failed = urls.isNotEmpty && cachedPaths.isEmpty;
 
       emit(
         state.copyWith(
           remotePresets: cachedPaths,
           remoteFetchAttempted: true,
-          remoteFetchFailed: false,
+          remoteFetchFailed: failed,
         ),
       );
-    } catch (_) {
-      // Offline, or the request/download failed — non-fatal. Local
-      // presets remain fully usable; just note the remote section
-      // couldn't load.
+    } catch (error, stackTrace) {
+      // Offline, or listing the bucket failed outright — non-fatal.
+      // Local presets remain fully usable; the UI just shows a
+      // plain, human-readable message. Logged — never surfaced
+      // verbatim — so the real cause is visible to us in dev tools /
+      // crash reporting.
+      developer.log(
+        'Failed to load Supabase background presets',
+        name: 'BackgroundPickerBloc',
+        error: error,
+        stackTrace: stackTrace,
+      );
       emit(
         state.copyWith(
           remoteFetchAttempted: true,

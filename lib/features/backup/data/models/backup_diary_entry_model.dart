@@ -63,6 +63,12 @@ class BackupDiaryEntryModel {
       'stickers': entry.stickers.map((s) => s.toJson()).toList(),
       'wordCount': entry.wordCount,
       'fontFamily': entry.fontFamily,
+      'alignment': entry.alignment,
+      'isBold': entry.isBold,
+      'isItalic': entry.isItalic,
+      'isUnderline': entry.isUnderline,
+      'fontSize': entry.fontSize,
+      'textColorHex': entry.textColorHex,
       'isFavorite': entry.isFavorite,
       'createdAt': entry.createdAt.toIso8601String(),
       'updatedAt': entry.updatedAt.toIso8601String(),
@@ -223,6 +229,16 @@ class BackupDiaryEntryModel {
       stickers: stickers,
       wordCount: (json['wordCount'] as num?)?.toInt() ?? 0,
       fontFamily: json['fontFamily'] as String?,
+      // Defaults mirror DiaryEntryModel.fromMap's exact conventions —
+      // 'left'/false for these, so a backup missing them entirely
+      // (e.g. one made before this fix shipped) falls back to the same
+      // defaults a brand-new entry would get, rather than throwing.
+      alignment: json['alignment'] as String? ?? 'left',
+      isBold: json['isBold'] as bool? ?? false,
+      isItalic: json['isItalic'] as bool? ?? false,
+      isUnderline: json['isUnderline'] as bool? ?? false,
+      fontSize: json['fontSize'] as String?,
+      textColorHex: json['textColorHex'] as String?,
       isFavorite: json['isFavorite'] as bool? ?? false,
       createdAt: DateTime.parse(createdAt),
       updatedAt: DateTime.parse(updatedAt),

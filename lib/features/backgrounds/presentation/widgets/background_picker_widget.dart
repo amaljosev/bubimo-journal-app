@@ -1,10 +1,9 @@
 // lib/features/backgrounds/presentation/widgets/background_picker_widget.dart
 
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:bubimo/core/error/exceptions.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
@@ -16,6 +15,17 @@ import '../../../../core/widgets/needs_internet_inline.dart';
 import '../bloc/background_picker/background_picker_bloc.dart';
 import '../bloc/background_picker/background_picker_event.dart';
 import '../bloc/background_picker/background_picker_state.dart';
+
+/// One shared loading visual for every "still working on it" moment
+/// in this picker (connectivity check, remote fetch) — a single
+/// common loading state instead of several different-looking ones.
+const Widget _loadingIndicator = Center(
+  child: SizedBox(
+    width: 20,
+    height: 20,
+    child: CircularProgressIndicator(strokeWidth: 2),
+  ),
+);
 
 /// Where a selected background came from — determines which of
 /// `DiaryEntry`'s two background fields the caller should set.
@@ -192,13 +202,7 @@ class _PresetsTabState extends State<_PresetsTab>
     super.build(context); // required by AutomaticKeepAliveClientMixin
 
     if (_hasInternet == null) {
-      return const Center(
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
+      return _loadingIndicator;
     }
 
     if (!_hasInternet!) {
@@ -211,59 +215,52 @@ class _PresetsTabState extends State<_PresetsTab>
 
     return BlocBuilder<BackgroundPickerBloc, BackgroundPickerState>(
       builder: (context, state) {
-        return ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            Text('Downloaded', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            if (!state.remoteFetchAttempted)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Center(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+        if (!state.remoteFetchAttempted) {
+          return _loadingIndicator;
+        }
+
+        if (state.remoteFetchFailed) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "Couldn't load backgrounds — check your connection.",
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                ),
-              )
-            else if (state.remoteFetchFailed)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Column(
-                  children: [
-                    Text(
-                      "Couldn't load more backgrounds — check your "
-                      'connection.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => context.read<BackgroundPickerBloc>().add(
-                        const LoadBackgrounds(),
-                      ),
-                      child: const Text('Try again'),
-                    ),
-                  ],
-                ),
-              )
-            else if (state.remotePresets.isEmpty)
-              Text(
-                'No additional packs available right now.',
-                style: Theme.of(context).textTheme.bodySmall,
-              )
-            else
-              _BackgroundGrid(
-                paths: state.remotePresets,
-                onTap: (path) => widget.onSelected(
-                  SelectedBackground(
-                    type: BackgroundSourceType.presetRemote,
-                    path: path,
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => context
+                        .read<BackgroundPickerBloc>()
+                        .add(const LoadBackgrounds()),
+                    child: const Text('Try again'),
                   ),
-                ),
+                ],
               ),
-          ],
+            ),
+          );
+        }
+
+        if (state.remotePresets.isEmpty) {
+          return Center(
+            child: Text(
+              'No backgrounds available right now.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          );
+        }
+
+        return _BackgroundGrid(
+          paths: state.remotePresets,
+          onTap: (path) => widget.onSelected(
+            SelectedBackground(
+              type: BackgroundSourceType.presetRemote,
+              path: path,
+            ),
+          ),
         );
       },
     );
@@ -278,21 +275,13 @@ class _BackgroundGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (paths.isEmpty) {
-      return Text(
-        'None available.',
-        style: Theme.of(context).textTheme.bodySmall,
-      );
-    }
-
     return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+        crossAxisCount: 4,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 1,
+        childAspectRatio: 0.7,
       ),
       itemCount: paths.length,
       itemBuilder: (context, index) {
@@ -302,23 +291,23 @@ class _BackgroundGrid extends StatelessWidget {
           onTap: () => onTap(path),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            // `path` is the Supabase public URL for this preset, not a
-            // local file path — CachedNetworkImage resolves the
-            // network-vs-disk-cache decision itself and shows
-            // `placeholder` while that resolves, same pattern as the
-            // sticker grid's thumbnails.
-            child: CachedNetworkImage(
-              imageUrl: path,
+            // `path` is a durable LOCAL file path, not a URL — the
+            // bloc downloads and caches every Supabase preset up
+            // front (see BackgroundPickerState.remotePresets' doc
+            // comment), so by the time the grid renders it's already
+            // on disk. Image.file, not a network image loader.
+            child: Image.file(
+              File(path),
               fit: BoxFit.cover,
-              fadeInDuration: Duration.zero,
-              fadeOutDuration: Duration.zero,
-              placeholder: (_, _) => const Center(
-                child: CupertinoActivityIndicator(),
-              ),
-              errorWidget: (_, _, _) => const Icon(
-                Icons.broken_image,
-                color: Colors.grey,
-              ),
+              errorBuilder: (context, error, stackTrace) {
+                developer.log(
+                  'Failed to render cached background preset: $path',
+                  name: 'BackgroundPickerWidget',
+                  error: error,
+                  stackTrace: stackTrace,
+                );
+                return const Icon(Icons.broken_image, color: Colors.grey);
+              },
             ),
           ),
         );

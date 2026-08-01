@@ -136,7 +136,7 @@ class DiaryApp extends StatelessWidget {
       child: BlocBuilder<AppThemeCubit, ThemeData>(
         builder: (context, themeData) {
           return MaterialApp.router(
-            title: 'Diary',
+            title: 'Journal App',
             debugShowCheckedModeBanner: false,
             theme: themeData,
             routerConfig: appRouter,
