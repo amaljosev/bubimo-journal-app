@@ -117,6 +117,13 @@ import '../../features/onboarding/domain/usecases/check_onboarding_status.dart';
 import '../../features/onboarding/domain/usecases/complete_onboarding.dart';
 import '../../features/onboarding/presentation/bloc/onboarding_bloc.dart';
 
+// app_update
+import '../../features/app_update/data/datasources/app_update_local_data_source.dart';
+import '../../features/app_update/data/repositories/app_update_repository_impl.dart';
+import '../../features/app_update/domain/repositories/app_update_repository.dart';
+import '../../features/app_update/domain/usecases/check_for_update.dart';
+import '../../features/app_update/domain/usecases/start_flexible_update.dart';
+
 final GetIt getIt = GetIt.instance;
 
 /// Registers every dependency the app needs, using manual GetIt
@@ -550,5 +557,28 @@ getIt.registerFactory<BackgroundPickerBloc>(
   // option).
   getIt.registerFactory(
     () => OnboardingBloc(completeOnboarding: getIt<CompleteOnboarding>()),
+  );
+
+  // --- app_update ---
+  // No bloc here, deliberately — unlike onboarding (which has its own
+  // screen and OnboardingBloc), this feature has no dedicated screen
+  // of its own. CheckForUpdate is called directly from the splash's
+  // `Future.wait([...])` (see splash_page.dart / app_router.dart)
+  // exactly the way CheckOnboardingStatus is, and StartFlexibleUpdate
+  // is called once, fire-and-forget, right after that — see
+  // app_router.dart for the call site. If a future requirement adds
+  // real UI beyond the OS-native "update downloaded" prompt (an
+  // in-app banner, a settings-screen "check for updates" button),
+  // give it a bloc then rather than one that has no screen to serve
+  // today.
+  getIt.registerLazySingleton(() => const AppUpdateLocalDataSource());
+  getIt.registerLazySingleton<AppUpdateRepository>(
+    () => AppUpdateRepositoryImpl(getIt<AppUpdateLocalDataSource>()),
+  );
+  getIt.registerLazySingleton(
+    () => CheckForUpdate(getIt<AppUpdateRepository>()),
+  );
+  getIt.registerLazySingleton(
+    () => StartFlexibleUpdate(getIt<AppUpdateRepository>()),
   );
 }

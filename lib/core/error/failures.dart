@@ -149,3 +149,16 @@ final class FontDownloadFailure extends Failure {
     super.message = 'Could not download this font. Using the default font for now.',
   ]);
 }
+
+/// An in-app-update check or download-start call was actually
+/// attempted on a real Android/Play Store install and failed at the
+/// platform level. Mirrors [AppUpdateException] — see that class's
+/// doc comment for why "unsupported platform/install" is NOT one of
+/// this Failure's causes (that case resolves to
+/// `AppUpdateStatus.noUpdateAvailable` and never reaches this type at
+/// all).
+final class AppUpdateFailure extends Failure {
+  const AppUpdateFailure([
+    super.message = 'Could not check for updates right now.',
+  ]);
+}

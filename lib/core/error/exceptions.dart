@@ -146,3 +146,19 @@ class NoInternetException extends AppException {
 class FontDownloadException extends AppException {
   const FontDownloadException({required super.message});
 }
+
+/// Thrown by [AppUpdateLocalDataSource] when an in-app-update check or
+/// download-start call was actually attempted on a real Android/Play
+/// Store install and failed at the platform level — e.g. the Play
+/// Store app itself is missing, disabled, or too outdated to answer,
+/// or `startFlexibleUpdate` is called without an update actually
+/// being available. Deliberately NOT thrown for "this platform/install
+/// doesn't support checking at all" (iOS, side loaded APK, no Play
+/// Store) — those cases resolve to `AppUpdateStatus.noUpdateAvailable`
+/// inside the data source itself and never reach this exception, same
+/// "silently no-op, never surface as an error" reasoning
+/// [NoInternetException] avoids for its own gate (see that class's
+/// doc comment) applied to a different unsupported-environment case.
+class AppUpdateException extends AppException {
+  const AppUpdateException({required super.message});
+}

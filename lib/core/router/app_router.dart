@@ -1,5 +1,7 @@
 // lib/core/router/app_router.dart
 
+import 'dart:async';
+
 import 'package:bubimo/core/di/injection.dart';
 import 'package:bubimo/core/navigation/main_shell.dart';
 import 'package:bubimo/features/help/domain/faq_item.dart';
@@ -24,6 +26,9 @@ import '../../../features/home/presentation/bloc/diary_list/diary_list_bloc.dart
 import '../../../features/home/presentation/bloc/diary_list/diary_list_event.dart';
 import '../../../features/onboarding/domain/usecases/check_onboarding_status.dart';
 import '../../../features/onboarding/presentation/pages/onboarding_page.dart';
+import '../../../features/app_update/domain/entities/app_update_status.dart';
+import '../../../features/app_update/domain/usecases/check_for_update.dart';
+import '../../../features/app_update/domain/usecases/start_flexible_update.dart';
 import '../../../features/reminders/presentation/bloc/reminder_settings/reminder_settings_bloc.dart';
 import '../../../features/reminders/presentation/bloc/reminder_settings/reminder_settings_event.dart';
 import '../../../features/reminders/presentation/pages/reminder_settings_page.dart';
@@ -98,6 +103,42 @@ Future<void> _runStartupChecks() async {
     // <-- add the lock-config-loaded future here, alongside the
     // onboarding check above, once its source is confirmed.
   ]);
+
+  // Deliberately NOT inside the Future.wait above, and deliberately
+  // not awaited by this function at all — an update check has no
+  // business delaying the splash hand-off the way onboarding-status
+  // and lock-config genuinely do (redirect can't decide where to send
+  // a cold start without those two). This just needs to be *started*
+  // before splash finishes; whether it resolves before or after
+  // doesn't affect anything `redirect` reads.
+  unawaited(_maybeStartAppUpdate());
+}
+
+/// Checks for an available update and, if one exists, starts Play's
+/// flexible download in the background. Silent by design at every
+/// step — see [AppUpdateRepository]/[AppUpdateLocalDataSource]'s doc
+/// comments: a failed check, no update, or a non-Android/non-Play
+/// install are all indistinguishable from here, and none of them
+/// should ever produce a SnackBar, dialog, or blocked navigation.
+/// Once a flexible download completes, the OS's own native "restart
+/// to finish updating?" prompt appears on its own with no further
+/// action needed from this app.
+Future<void> _maybeStartAppUpdate() async {
+  final result = await getIt<CheckForUpdate>()();
+
+  result.fold(
+    (failure) {
+      // Swallowed by design, same fail-open reasoning as
+      // CheckOnboardingStatus's catch block — replace with a
+      // debugPrint or crash-reporting hook if/when this app adds
+      // one, but never surface this as blocking UI.
+    },
+    (status) {
+      if (status == AppUpdateStatus.updateAvailable) {
+        unawaited(getIt<StartFlexibleUpdate>()());
+      }
+    },
+  );
 }
 
 final GoRouter appRouter = GoRouter(
