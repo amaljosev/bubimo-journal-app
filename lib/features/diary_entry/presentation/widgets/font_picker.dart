@@ -115,22 +115,37 @@ class _FontPickerState extends State<FontPicker> {
     super.dispose();
   }
 
-  void _handleFontTap(String? resolvedFamily) {
+  Future<void> _handleFontTap(String? resolvedFamily) async {
     _selectedFamily.value = resolvedFamily;
+
+    if (resolvedFamily != null) {
+      // Same principle as the Custom Theme screen's Font Picker sheet
+      // (see FontPickerSheet._handleFontTap): secure the real font
+      // FIRST, and only report the pick to the page once that attempt
+      // has settled — rather than applying the pick immediately and
+      // relying on a fire-and-forget download to quietly finish and
+      // somehow get picked up later. That's what made this picker
+      // behave differently from the (working) Custom Theme one: the
+      // Custom Theme sheet never hands its result back until
+      // `ensureFontAvailable` has already resolved, so by the time
+      // anything renders the new font, it's guaranteed to actually be
+      // there.
+      final result = await getIt<SafeFontService>().ensureFontAvailable(
+        resolvedFamily,
+      );
+      if (!mounted) return;
+      result.match(
+        (failure) => ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(failure.message)),
+        ),
+        (_) {},
+      );
+      if (!mounted) return;
+    }
+
     widget.onFontSelected(resolvedFamily);
     // Reassert unfocus after the format operation that may have refocused
     widget.onAfterFormat?.call();
-
-    if (resolvedFamily != null) {
-      // Fire-and-forget: the format already applied instantly using
-      // whatever SafeFontService could resolve right now (cached font
-      // or system fallback). This just gives an uncached pick a real,
-      // awaited attempt to arrive shortly after, rather than only
-      // waiting for the next background precache sweep.
-      unawaited(
-        getIt<SafeFontService>().ensureFontAvailable(resolvedFamily),
-      );
-    }
   }
 
   @override

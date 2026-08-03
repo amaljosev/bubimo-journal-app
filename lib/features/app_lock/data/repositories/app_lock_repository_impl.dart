@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:fpdart/fpdart.dart';
 import '../../domain/entities/lock_config.dart';
 import '../../domain/entities/lock_failure.dart';
@@ -29,6 +30,18 @@ class AppLockRepositoryImpl implements AppLockRepository {
   /// dictionary attack on a stolen hash — same tradeoff a 4-digit PIN
   /// implies either way.
   String _hash(String value) => sha256.convert(utf8.encode(value)).toString();
+
+  /// Logs the real platform/plugin error (e.g. the raw
+  /// PlatformException/LocalAuthException local_auth throws) to the
+  /// debug console only. Never returned to callers and never surfaced
+  /// to the user — UI-facing text always comes from the LockFailure's
+  /// own fixed, human-readable default message (see lock_failure.dart),
+  /// regardless of what the underlying exception actually says.
+  void _logBiometricError(String where, Object error, StackTrace stack) {
+    if (kDebugMode) {
+      debugPrint('[AppLock] $where failed: $error\n$stack');
+    }
+  }
 
   @override
   TaskEither<LockFailure, LockConfig> getLockConfig() {
@@ -87,7 +100,10 @@ class AppLockRepositoryImpl implements AppLockRepository {
   TaskEither<LockFailure, bool> isBiometricAvailable() {
     return TaskEither<LockFailure, bool>.tryCatch(
       () => _biometric.isAvailable(),
-      (error, stack) => BiometricUnavailableFailure('$error'),
+      (error, stack) {
+        _logBiometricError('isBiometricAvailable', error, stack);
+        return const BiometricUnavailableFailure();
+      },
     );
   }
 
@@ -97,7 +113,10 @@ class AppLockRepositoryImpl implements AppLockRepository {
   }) {
     return TaskEither<LockFailure, bool>.tryCatch(
       () => _biometric.authenticate(reason: reason),
-      (error, stack) => BiometricAuthFailure('$error'),
+      (error, stack) {
+        _logBiometricError('authenticateWithBiometrics', error, stack);
+        return const BiometricAuthFailure();
+      },
     );
   }
 

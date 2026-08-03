@@ -206,7 +206,8 @@ class SafeFontService {
       await _markAvailable(fontFamily);
       onFontBecameAvailable?.call(fontFamily);
       return const Right(null);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('SafeFontService: failed to load "$fontFamily" — $e');
       return const Left(
         FontDownloadFailure(
           "Couldn't download this font right now. Using the default "

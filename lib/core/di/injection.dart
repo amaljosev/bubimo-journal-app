@@ -1,5 +1,6 @@
 // lib/core/di/injection.dart
 
+import 'package:bubimo/features/backgrounds/data/datasources/background_preset_cache_data_source.dart';
 import 'package:bubimo/features/backup/presentation/bloc/backup_bloc.dart';
 import 'package:bubimo/features/contact_us/data/repositories/contact_repository_impl.dart';
 import 'package:bubimo/features/contact_us/domain/repositories/contact_repository.dart';
@@ -367,11 +368,15 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => SupabaseBackgroundDataSource(getIt<SupabaseStorageAssetService>()),
   );
-  getIt.registerFactory(
-    () => BackgroundPickerBloc(
-      remoteDataSource: getIt<SupabaseBackgroundDataSource>(),
-    ),
-  );
+  getIt.registerLazySingleton<BackgroundPresetCacheDataSource>(
+  () => JsonFileBackgroundPresetCacheDataSource(),
+);
+getIt.registerFactory<BackgroundPickerBloc>(
+  () => BackgroundPickerBloc(
+    remoteDataSource: getIt<SupabaseBackgroundDataSource>(),
+    cacheDataSource: getIt<BackgroundPresetCacheDataSource>(),
+  ),
+);
 
   // --- cloud_backup ---
   // GoogleAuthDataSource is a lazy singleton — it tracks the current

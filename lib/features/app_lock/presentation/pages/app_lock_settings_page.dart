@@ -155,34 +155,39 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
     final succeeded =
         bloc.state.verificationStatus == VerificationStatus.success;
 
-    // DIAGNOSTIC FIX: previously this always showed a hardcoded generic
-    // string ("Biometric not supported on this device or authentication
-    // failed.") no matter what actually went wrong — which meant a
-    // missing FlutterFragmentActivity, a missing manifest permission, no
-    // enrolled biometric, and a genuine user cancel all looked
-    // IDENTICAL from the UI. Surfacing the real
-    // AppLockState.verificationError (the message BiometricAuthFailure/
-    // BiometricUnavailableFailure actually carries — see
-    // app_lock_repository_impl.dart's authenticateWithBiometrics, which
-    // wraps whatever local_auth's authenticate() throws) tells you the
-    // real underlying exception instead of guessing blind.
-    final rawError = bloc.state.verificationError;
+    // AppLockState.verificationError now always carries one of
+    // LockFailure's fixed, human-readable default messages (e.g.
+    // "Authentication was cancelled or failed." /
+    // "Biometric authentication is not available on this device.") —
+    // see app_lock_repository_impl.dart's authenticateWithBiometrics /
+    // isBiometricAvailable, which log the real underlying
+    // exception/stack to the debug console themselves and never pass
+    // it up into the message shown here. So this is safe to show
+    // directly, with no raw exception text leaking into the SnackBar.
+    final message = bloc.state.verificationError;
     bloc.add(const ResetVerification());
 
     if (!succeeded && mounted) {
       _showSnackBar(
-        rawError == null || rawError.isEmpty
-            ? 'Biometric authentication failed (no error detail returned).'
-            : 'Biometric error: $rawError',
+        message == null || message.isEmpty
+            ? 'Biometric authentication failed. Please try again.'
+            : message,
       );
     }
     return succeeded;
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+        ),
+        backgroundColor: Theme.of(context).colorScheme.secondary,
+      ),
+    );
   }
 
   @override

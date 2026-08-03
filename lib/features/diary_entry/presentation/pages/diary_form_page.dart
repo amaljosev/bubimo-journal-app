@@ -858,7 +858,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
 
-    final selection = await showBackgroundPickerSheet(context);
+    final selection = await showBackgroundPickerSheet(
+      context,
+      currentPresetPath: _bloc.state.bgLocalPath,
+    );
     if (selection == null) return;
 
     switch (selection.type) {
@@ -867,6 +870,19 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       case BackgroundSourceType.gallery:
         _bloc.add(
           DiaryFormBackgroundChanged(bgGalleryImagePath: selection.path),
+        );
+      case BackgroundSourceType.none:
+        // User explicitly cleared the background. NOTE: whether this
+        // actually clears a previously-set path depends on how
+        // DiaryFormBloc's handler applies these fields — if it uses a
+        // `value ?? state.value` copyWith (common, and indistinguishable
+        // here from "field simply not provided"), passing null won't
+        // overwrite an existing one. Worth a quick manual check
+        // (set a gallery photo, reopen the picker, tap None) since I
+        // don't have diary_form_bloc.dart/diary_form_state.dart to
+        // confirm either way.
+        _bloc.add(
+          DiaryFormBackgroundChanged(bgLocalPath: null, bgGalleryImagePath: null),
         );
     }
   }
