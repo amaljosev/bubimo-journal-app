@@ -40,6 +40,7 @@ import '../../features/backup/domain/usecases/export_diary_pdf.dart';
 import '../../features/backup/domain/usecases/import_diary_backup.dart';
 
 // diary_entry (stickers)
+import '../../features/diary_entry/data/datasources/sticker_cache_data_source.dart';
 import '../../features/diary_entry/data/datasources/supabase_sticker_data_source.dart';
 import '../../features/diary_entry/data/repositories/sticker_repository_impl.dart';
 import '../../features/diary_entry/domain/repositories/sticker_repository.dart';
@@ -257,10 +258,18 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<StickerRepository>(
     () => StickerRepositoryImpl(getIt<SupabaseStickerDataSource>()),
   );
+  // Offline seed for the first sticker category — same JSON-file
+  // approach as BackgroundPresetCacheDataSource, for consistency.
+  getIt.registerLazySingleton<StickerCacheDataSource>(
+    () => JsonFileStickerCacheDataSource(),
+  );
   // Factory (not singleton) — a fresh StickerPickerBloc is created each
   // time the picker sheet opens, mirroring BackgroundPickerBloc.
   getIt.registerFactory(
-    () => StickerPickerBloc(stickerRepository: getIt<StickerRepository>()),
+    () => StickerPickerBloc(
+      stickerRepository: getIt<StickerRepository>(),
+      cacheDataSource: getIt<StickerCacheDataSource>(),
+    ),
   );
 
   // --- home ---
@@ -563,14 +572,13 @@ getIt.registerFactory<BackgroundPickerBloc>(
   // No bloc here, deliberately — unlike onboarding (which has its own
   // screen and OnboardingBloc), this feature has no dedicated screen
   // of its own. CheckForUpdate is called directly from the splash's
-  // `Future.wait([...])` (see splash_page.dart / app_router.dart)
+  // startup checks (see app_router.dart's `_maybeStartAppUpdate`)
   // exactly the way CheckOnboardingStatus is, and StartFlexibleUpdate
-  // is called once, fire-and-forget, right after that — see
-  // app_router.dart for the call site. If a future requirement adds
-  // real UI beyond the OS-native "update downloaded" prompt (an
-  // in-app banner, a settings-screen "check for updates" button),
-  // give it a bloc then rather than one that has no screen to serve
-  // today.
+  // is called once, fire-and-forget, right after that. If a future
+  // requirement adds real UI beyond the OS-native "update downloaded"
+  // prompt (an in-app banner, a settings-screen "check for updates"
+  // button), give it a bloc then rather than one that has no screen
+  // to serve today.
   getIt.registerLazySingleton(() => const AppUpdateLocalDataSource());
   getIt.registerLazySingleton<AppUpdateRepository>(
     () => AppUpdateRepositoryImpl(getIt<AppUpdateLocalDataSource>()),

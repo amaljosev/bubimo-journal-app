@@ -2,6 +2,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../../../../core/di/injection.dart';
+import '../../../../../core/theme/font/safe_font_service.dart';
 import '../../../../../core/utils/date_utils.dart';
 import '../../../domain/entities/mood.dart';
 
@@ -131,6 +133,21 @@ class DiaryFormTitleField extends StatelessWidget {
   final double? fontSize;
   final Color? textColor;
 
+  /// Mirrors the T panel's Font picker — same whole-entry rationale as
+  /// [textAlign] and the style booleans above. `null` means no
+  /// override (renders in the field's own default typeface).
+  ///
+  /// Resolved through [SafeFontService.resolveTextStyle] rather than
+  /// applied as a raw `TextStyle(fontFamily: ...)` — same reasoning as
+  /// every other font lookup in this app: a family that hasn't
+  /// finished downloading yet just isn't registered with the engine,
+  /// so asking for it directly would silently render in the platform
+  /// fallback anyway. Routing through the shared service instead means
+  /// this field automatically picks up the real font the next time
+  /// it's rebuilt after the download completes, exactly like the Font
+  /// Picker's own preview rows.
+  final String? fontFamily;
+
   const DiaryFormTitleField({
     super.key,
     required this.controller,
@@ -143,6 +160,7 @@ class DiaryFormTitleField extends StatelessWidget {
     this.isUnderlined = false,
     this.fontSize,
     this.textColor,
+    this.fontFamily,
   });
 
   @override
@@ -152,6 +170,14 @@ class DiaryFormTitleField extends StatelessWidget {
       fontWeight: FontWeight.w800,
       color: theme.colorScheme.onSurface,
     );
+
+    final family = fontFamily;
+    final familyStyle = (family == null || baseStyle == null)
+        ? baseStyle
+        : getIt<SafeFontService>().resolveTextStyle(
+            fontFamily: family,
+            base: baseStyle,
+          );
 
     return TextField(
       controller: controller,
@@ -168,13 +194,13 @@ class DiaryFormTitleField extends StatelessWidget {
       // off falls back to the title's own w800 default rather than a
       // plain w400, keeping the title from ever looking lighter than
       // its normal look.
-      style: baseStyle?.copyWith(
+      style: familyStyle?.copyWith(
         fontWeight: isBold ? FontWeight.w900 : FontWeight.w800,
         fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
         decoration:
             isUnderlined ? TextDecoration.underline : TextDecoration.none,
-        fontSize: fontSize ?? baseStyle.fontSize,
-        color: textColor ?? baseStyle.color,
+        fontSize: fontSize ?? familyStyle.fontSize,
+        color: textColor ?? familyStyle.color,
       ),
       decoration: InputDecoration(
         hintText: 'Title',

@@ -11,6 +11,7 @@ import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/font/safe_font_service.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../../core/widgets/error_screen.dart';
 import '../../../../core/widgets/loading_screen.dart';
@@ -304,15 +305,23 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                         final baseStyle = Theme.of(
                           context,
                         ).textTheme.headlineSmall;
+                        final fontFamily = entry.fontFamily;
+                        final familyStyle =
+                            (fontFamily == null || baseStyle == null)
+                            ? baseStyle
+                            : getIt<SafeFontService>().resolveTextStyle(
+                                fontFamily: fontFamily,
+                                base: baseStyle,
+                              );
                         return Text(
                           entry.title?.isNotEmpty == true
                               ? entry.title!
                               : 'Untitled',
                           textAlign: _textAlignFor(entry.alignment),
-                          style: baseStyle?.copyWith(
+                          style: familyStyle?.copyWith(
                             fontWeight: entry.isBold
                                 ? FontWeight.w900
-                                : baseStyle.fontWeight,
+                                : familyStyle?.fontWeight,
                             fontStyle: entry.isItalic
                                 ? FontStyle.italic
                                 : FontStyle.normal,
@@ -321,10 +330,10 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                                 : TextDecoration.none,
                             fontSize: entry.fontSize != null
                                 ? double.tryParse(entry.fontSize!)
-                                : baseStyle.fontSize,
+                                : familyStyle?.fontSize,
                             color: entry.textColorHex != null
                                 ? _colorFromHex(entry.textColorHex!)
-                                : baseStyle.color,
+                                : familyStyle?.color,
                           ),
                         );
                       },
@@ -355,6 +364,29 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                                 DividerEmbedBuilder(),
                                 ...FlutterQuillEmbeds.editorBuilders(),
                               ],
+                              // See the same fix in diary_form_page.dart's
+                              // _quillEditorConfig: flutter_quill applies
+                              // the 'font' attribute as a raw
+                              // TextStyle(fontFamily: value), but
+                              // google_fonts never registers a
+                              // dynamically-loaded font under its plain
+                              // display name — only under an internal
+                              // variant-encoded name, with the plain name
+                              // as a fallback. Routing through
+                              // SafeFontService here does the same
+                              // translation the title above now gets.
+                              customStyleBuilder: (attribute) {
+                                if (attribute.key == 'font' &&
+                                    attribute.value != null) {
+                                  return getIt<SafeFontService>()
+                                      .resolveTextStyle(
+                                        fontFamily: attribute.value
+                                            .toString(),
+                                        base: const TextStyle(),
+                                      );
+                                }
+                                return const TextStyle();
+                              },
                             ),
                           ),
                           for (final image in entry.overlayImages)

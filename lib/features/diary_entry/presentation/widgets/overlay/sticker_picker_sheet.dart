@@ -1,6 +1,7 @@
 // lib/features/diary_entry/presentation/widgets/overlay/sticker_picker_sheet.dart
 
-import 'dart:developer';
+import 'dart:developer' as developer;
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart';
@@ -8,9 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../core/di/injection.dart';
-import '../../../../../core/network/network_info.dart';
-import '../../../../../core/widgets/needs_internet_inline.dart';
 import '../../bloc/sticker_picker/sticker_picker_bloc.dart';
+import '../../bloc/sticker_picker/sticker_picker_event.dart';
+import '../../bloc/sticker_picker/sticker_picker_state.dart';
 
 /// Opens the sticker picker bottom sheet and returns the URL of the
 /// sticker the user tapped, or `null` if they dismissed it without
@@ -19,15 +20,17 @@ import '../../bloc/sticker_picker/sticker_picker_bloc.dart';
 /// Mirrors `showBackgroundPickerSheet`'s calling convention: the caller
 /// (diary_form_page) owns what happens next (downloading + placing the
 /// sticker as an overlay) — this function's only job is presenting the
-/// picker UI and returning a selection.
+/// picker UI and returning a selection. That download-on-select flow
+/// is unchanged by the offline-seed work below: `downloadSticker`
+/// already resolves instantly for anything already on disk, so a
+/// seeded sticker just makes that round-trip a no-op instead of a
+/// real network call.
 ///
-/// Gates on connectivity before ever dispatching the Supabase category
-/// fetch: `_StickerPickerSheetState` checks `NetworkInfo` first and
-/// shows `NeedsInternetInline` in place of the picker if there's none,
-/// with its own retry — the bloc's own `categoriesError` state (below)
-/// stays as a second layer for a fetch that starts fine but fails
-/// mid-flight (rate limit, Supabase outage, connection dropping
-/// between the gate check and the fetch actually completing).
+/// No connectivity pre-check anymore — the bloc's own state (seeded
+/// offline cache, or a real fetch failure) drives everything now, the
+/// same change made to `showBackgroundPickerSheet`. Gating on
+/// `NetworkInfo` before ever creating the bloc would block an offline
+/// user from seeing a perfectly valid cached category.
 Future<String?> showStickerPickerSheet(BuildContext context) {
   return showModalBottomSheet<String>(
     context: context,
@@ -44,73 +47,24 @@ class _StickerPickerSheet extends StatefulWidget {
 }
 
 class _StickerPickerSheetState extends State<_StickerPickerSheet> {
-  final NetworkInfo _networkInfo = getIt<NetworkInfo>();
-
-  /// Null while the first connectivity check is still running; true/
-  /// false once known. Checked BEFORE the bloc is even created, so an
-  /// offline visit never fires the Supabase category fetch at all —
-  /// same reasoning as `CloudBackupGate` checking before building the
-  /// real cloud backup screen, just for a sheet instead of a route.
-  bool? _hasInternet;
-  bool _isRetrying = false;
-
-  StickerPickerBloc? _bloc;
+  late final StickerPickerBloc _bloc;
 
   @override
   void initState() {
     super.initState();
-    _check(initial: true);
+    _bloc = getIt<StickerPickerBloc>()..add(const StickerPickerRequested());
   }
 
   @override
   void dispose() {
-    _bloc?.close();
+    _bloc.close();
     super.dispose();
-  }
-
-  Future<void> _check({bool initial = false}) async {
-    setState(() => _isRetrying = !initial);
-
-    final hasInternet = await _networkInfo.isConnected;
-    if (!mounted) return;
-
-    setState(() {
-      _hasInternet = hasInternet;
-      _isRetrying = false;
-    });
-
-    if (hasInternet && _bloc == null) {
-      _bloc = getIt<StickerPickerBloc>()
-        ..add(const StickerPickerRequested());
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_hasInternet == null) {
-      return const SafeArea(
-        child: SizedBox(
-          height: 200,
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
-
-    if (!_hasInternet!) {
-      return SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.5,
-          child: NeedsInternetInline(
-            action: 'browse stickers',
-            isRetrying: _isRetrying,
-            onRetry: () => _check(),
-          ),
-        ),
-      );
-    }
-
     return BlocProvider.value(
-      value: _bloc!,
+      value: _bloc,
       child: const _StickerPickerContent(),
     );
   }
@@ -121,135 +75,53 @@ class _StickerPickerContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return SafeArea(
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.5,
         child: BlocBuilder<StickerPickerBloc, StickerPickerState>(
+          // Compares the raw stored fields, not the `stickersByCategory`
+          // getter — that getter rebuilds a fresh Map on every call, so
+          // comparing it directly would (mis-)report "changed" on every
+          // single state, defeating the point of buildWhen.
           buildWhen: (prev, current) =>
               prev.isLoadingCategories != current.isLoadingCategories ||
               prev.categoriesError != current.categoriesError ||
-              prev.stickersByCategory != current.stickersByCategory,
+              prev.isSyncingCategories != current.isSyncingCategories ||
+              prev.categoryUrls != current.categoryUrls ||
+              prev.downloadedByUrl != current.downloadedByUrl,
           builder: (context, state) {
             if (state.isLoadingCategories) {
               return const Center(child: CircularProgressIndicator());
             }
 
             if (state.categoriesError != null) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 72,
-                      height: 72,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: 0.08,
-                        ),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.cloud_off_rounded,
-                        size: 34,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      'No internet connection',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'You need an internet connection to browse '
-                      'stickers.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton.tonalIcon(
-                      onPressed: () => context.read<StickerPickerBloc>().add(
-                        const StickerPickerRetried(),
-                      ),
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Try again'),
-                    ),
-                  ],
-                ),
-              );
+              // Deliberately not displaying state.categoriesError's
+              // content — it's sourced from Failure.message, which can
+              // carry a raw exception string. Logged in the bloc; the
+              // UI only ever shows this fixed, human-readable copy.
+              return const _CategoriesErrorView();
             }
 
-            final categories = state.stickersByCategory.keys.toList();
-            log(categories.toString());
+            final categoriesByName = state.stickersByCategory;
+            final categories = categoriesByName.keys.toList();
 
             if (categories.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.auto_awesome_outlined,
-                      size: 64,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No stickers yet',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.6,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
+              return const _EmptyStickersView();
             }
 
-            return DefaultTabController(
-              length: categories.length,
-              child: Column(
-                children: [
-                  SizedBox(
-                    height: 48,
-                    child: TabBar(
-                      isScrollable: true,
-                      tabAlignment: TabAlignment.start,
-                      tabs: categories.map((cat) => Tab(text: cat)).toList(),
-                      labelStyle: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                      indicatorSize: TabBarIndicatorSize.label,
-                    ),
-                  ),
-                  Expanded(
-                    child: TabBarView(
-                      children: categories.map((category) {
-                        final urls = state.stickersByCategory[category] ?? [];
-                        // Extracted into its own StatefulWidget (below)
-                        // specifically so AutomaticKeepAliveClientMixin
-                        // has something to attach to — TabBarView
-                        // disposes offscreen tabs by default, which was
-                        // tearing down each grid (and its already-cached
-                        // CachedNetworkImage widgets) on every tab
-                        // switch and forcing a full placeholder-then-
-                        // decode cycle on return, even though the bytes
-                        // were already on disk.
-                        return _StickerGrid(urls: urls);
-                      }).toList(),
-                    ),
-                  ),
-                ],
-              ),
+            return Column(
+              children: [
+                // Subtle, non-blocking — shown only while a seed is
+                // already on screen and we're checking Supabase for
+                // the rest in the background.
+                if (state.isSyncingCategories)
+                  const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: categories.length == 1
+                      ? _StickerGrid(items: categoriesByName[categories.first]!)
+                      : _CategoryTabs(categoriesByName: categoriesByName),
+                ),
+              ],
             );
           },
         ),
@@ -258,16 +130,154 @@ class _StickerPickerContent extends StatelessWidget {
   }
 }
 
-/// Renders a single category's sticker grid.
+class _CategoriesErrorView extends StatelessWidget {
+  const _CategoriesErrorView();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.cloud_off_rounded,
+              size: 34,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            "Couldn't load stickers",
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Check your connection and try again.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.tonalIcon(
+            onPressed: () => context.read<StickerPickerBloc>().add(
+              const StickerPickerRetried(),
+            ),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Try again'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyStickersView extends StatelessWidget {
+  const _EmptyStickersView();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.auto_awesome_outlined,
+            size: 64,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No stickers yet',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The tabbed view for 2+ known categories. Only ever built once
+/// `stickersByCategory` already has its final category count for this
+/// session (a single Supabase listing call populates all of them at
+/// once — this never grows further afterward), so `DefaultTabController`
+/// is created with the right `length` from the start and never needs
+/// to be resized after mounting, which it does not handle gracefully.
+class _CategoryTabs extends StatelessWidget {
+  final Map<String, List<StickerPickerItem>> categoriesByName;
+
+  const _CategoryTabs({required this.categoriesByName});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final categories = categoriesByName.keys.toList();
+
+    return DefaultTabController(
+      length: categories.length,
+      child: Column(
+        children: [
+          SizedBox(
+            height: 48,
+            child: TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: categories.map((cat) => Tab(text: cat)).toList(),
+              labelStyle: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+              indicatorSize: TabBarIndicatorSize.label,
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              children: categories.map((category) {
+                // Extracted into its own StatefulWidget specifically so
+                // AutomaticKeepAliveClientMixin has something to attach
+                // to — TabBarView disposes offscreen tabs by default,
+                // which was tearing down each grid (and its already-
+                // resolved image caches) on every tab switch.
+                return _StickerGrid(items: categoriesByName[category] ?? const []);
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Renders a single category's sticker grid. Each tile shows a local
+/// file (already downloaded — either from the offline seed, or a
+/// previous selection this session) when one's available, falling
+/// back to `CachedNetworkImage` straight from the Supabase URL when
+/// it's not — categories beyond the seeded one stay this way until
+/// something in them is actually picked.
 ///
 /// Kept alive across tab switches via [AutomaticKeepAliveClientMixin]
-/// so [CachedNetworkImage]'s in-memory image cache (and the disk-cache
-/// lookups it already resolved) aren't discarded and re-paid-for every
-/// time the user flips back to a previously-viewed tab.
+/// so [CachedNetworkImage]'s in-memory cache isn't discarded and
+/// re-paid-for every time the user flips back to a previously-viewed
+/// tab.
 class _StickerGrid extends StatefulWidget {
-  const _StickerGrid({required this.urls});
+  const _StickerGrid({required this.items});
 
-  final List<String> urls;
+  final List<StickerPickerItem> items;
 
   @override
   State<_StickerGrid> createState() => _StickerGridState();
@@ -284,7 +294,7 @@ class _StickerGridState extends State<_StickerGrid>
     // means wantKeepAlive is silently ignored.
     super.build(context);
 
-    if (widget.urls.isEmpty) {
+    if (widget.items.isEmpty) {
       return Center(
         child: Text(
           'Nothing in this category',
@@ -305,23 +315,37 @@ class _StickerGridState extends State<_StickerGrid>
         crossAxisSpacing: 12,
         childAspectRatio: 1,
       ),
-      itemCount: widget.urls.length,
+      itemCount: widget.items.length,
       itemBuilder: (context, index) {
-        final url = widget.urls[index];
+        final item = widget.items[index];
         return InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => Navigator.pop(context, url),
+          onTap: () => Navigator.pop(context, item.url),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: CachedNetworkImage(
-              imageUrl: url,
-              fit: BoxFit.contain,
-              fadeInDuration: Duration.zero,
-              fadeOutDuration: Duration.zero,
-              placeholder: (_, _) => const CupertinoActivityIndicator(),
-              errorWidget: (_, _, _) =>
-                  const Icon(Icons.broken_image, color: Colors.grey),
-            ),
+            child: item.localPath != null
+                ? Image.file(
+                    File(item.localPath!),
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      developer.log(
+                        'Failed to render cached sticker: ${item.url}',
+                        name: 'StickerPickerSheet',
+                        error: error,
+                        stackTrace: stackTrace,
+                      );
+                      return const Icon(Icons.broken_image, color: Colors.grey);
+                    },
+                  )
+                : CachedNetworkImage(
+                    imageUrl: item.url,
+                    fit: BoxFit.contain,
+                    fadeInDuration: Duration.zero,
+                    fadeOutDuration: Duration.zero,
+                    placeholder: (_, _) => const CupertinoActivityIndicator(),
+                    errorWidget: (_, _, _) =>
+                        const Icon(Icons.broken_image, color: Colors.grey),
+                  ),
           ),
         );
       },

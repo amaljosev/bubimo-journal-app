@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:bubimo/core/utils/background_image_utils.dart';
 import 'package:bubimo/core/utils/overlay_tint_utils.dart';
 import 'package:bubimo/core/utils/quill_document_utils.dart';
+import 'package:bubimo/features/diary_entry/presentation/bloc/sticker_picker/sticker_picker_event.dart';
+import 'package:bubimo/features/diary_entry/presentation/bloc/sticker_picker/sticker_picker_state.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_bottom_toolbar.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/date_picker_widget.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/diary_form_header.dart';
@@ -20,6 +22,7 @@ import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/font/safe_font_service.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../../../../core/widgets/error_screen.dart';
 import '../../../../core/widgets/loading_screen.dart';
@@ -135,6 +138,30 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
           DividerEmbedBuilder(),
           ...FlutterQuillEmbeds.editorBuilders(),
         ],
+        // flutter_quill's own handling of the 'font' attribute applies
+        // the raw family string directly as `TextStyle(fontFamily:
+        // value)`. That's correct for a genuinely bundled asset (like
+        // SafeFontService.bundledDefaultFamily), but google_fonts
+        // never registers a dynamically-loaded font under its plain
+        // display name — it registers it under an internal
+        // variant-encoded name and only offers the plain name as a
+        // *fallback* (see GoogleFonts.getFont's return value). So the
+        // raw attribute value the editor renders with was never
+        // actually resolvable, no matter how long it had to download.
+        // Overriding just the 'font' key here routes it through the
+        // same SafeFontService translation the title field already
+        // uses; every other attribute returns an empty style so it
+        // doesn't disturb flutter_quill's own (already-correct)
+        // handling of bold/italic/size/color/etc.
+        customStyleBuilder: (attribute) {
+          if (attribute.key == 'font' && attribute.value != null) {
+            return getIt<SafeFontService>().resolveTextStyle(
+              fontFamily: attribute.value.toString(),
+              base: const TextStyle(),
+            );
+          }
+          return const TextStyle();
+        },
       );
 
   // Captured once so listeners registered outside `build` (Quill
@@ -619,6 +646,28 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
       quill.Attribute.fromKeyValue('font', fontFamily),
     );
     _bloc.add(DiaryFormFontFamilyChanged(fontFamily));
+
+    if (fontFamily == null) return;
+
+    // Both the editor (via _quillEditorConfig's customStyleBuilder) and
+    // the title (via DiaryFormTitleField) resolve fonts through
+    // SafeFontService, so once a family is actually cached, both
+    // render correctly on their next build. This just closes the
+    // remaining gap: if `fontFamily` wasn't cached yet, this format
+    // pass rendered with whatever SafeFontService could resolve at
+    // that instant, and nothing would otherwise revisit it once the
+    // real download finished. `ensureFontAvailable` triggers (and lets
+    // us await) that download — resolving immediately if it was
+    // already cached — and `setState` forces the rebuild that actually
+    // shows it once it's ready.
+    unawaited(
+      getIt<SafeFontService>().ensureFontAvailable(fontFamily).then((
+        result,
+      ) {
+        if (!mounted) return;
+        result.match((_) {}, (_) => setState(() {}));
+      }),
+    );
   }
 
   TextAlign _textAlignFor(String alignment) {
@@ -858,10 +907,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
 
-    final selection = await showBackgroundPickerSheet(
-      context,
-      currentPresetPath: _bloc.state.bgLocalPath,
-    );
+    final selection = await showBackgroundPickerSheet(context);
     if (selection == null) return;
 
     switch (selection.type) {
@@ -872,18 +918,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
           DiaryFormBackgroundChanged(bgGalleryImagePath: selection.path),
         );
       case BackgroundSourceType.none:
-        // User explicitly cleared the background. NOTE: whether this
-        // actually clears a previously-set path depends on how
-        // DiaryFormBloc's handler applies these fields — if it uses a
-        // `value ?? state.value` copyWith (common, and indistinguishable
-        // here from "field simply not provided"), passing null won't
-        // overwrite an existing one. Worth a quick manual check
-        // (set a gallery photo, reopen the picker, tap None) since I
-        // don't have diary_form_bloc.dart/diary_form_state.dart to
-        // confirm either way.
-        _bloc.add(
-          DiaryFormBackgroundChanged(bgLocalPath: null, bgGalleryImagePath: null),
-        );
+        _bloc.add(const DiaryFormBackgroundChanged());
     }
   }
 
@@ -1065,6 +1100,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                                     ? double.tryParse(state.fontSize!)
                                     : null,
                                 textColor: _colorFromHex(state.textColorHex),
+                                fontFamily: state.fontFamily,
                                 onChanged: (value) => context
                                     .read<DiaryFormBloc>()
                                     .add(DiaryFormTitleChanged(value)),
