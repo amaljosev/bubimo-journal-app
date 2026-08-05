@@ -321,7 +321,7 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                           style: familyStyle?.copyWith(
                             fontWeight: entry.isBold
                                 ? FontWeight.w900
-                                : familyStyle?.fontWeight,
+                                : familyStyle.fontWeight,
                             fontStyle: entry.isItalic
                                 ? FontStyle.italic
                                 : FontStyle.normal,
@@ -330,10 +330,10 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                                 : TextDecoration.none,
                             fontSize: entry.fontSize != null
                                 ? double.tryParse(entry.fontSize!)
-                                : familyStyle?.fontSize,
+                                : familyStyle.fontSize,
                             color: entry.textColorHex != null
                                 ? _colorFromHex(entry.textColorHex!)
-                                : familyStyle?.color,
+                                : familyStyle.color,
                           ),
                         );
                       },
@@ -380,8 +380,7 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
                                     attribute.value != null) {
                                   return getIt<SafeFontService>()
                                       .resolveTextStyle(
-                                        fontFamily: attribute.value
-                                            .toString(),
+                                        fontFamily: attribute.value.toString(),
                                         base: const TextStyle(),
                                       );
                                 }

@@ -176,7 +176,12 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     DiaryFormFontFamilyChanged event,
     Emitter<DiaryFormState> emit,
   ) {
-    emit(state.copyWith(fontFamily: event.fontFamily));
+    emit(
+      state.copyWith(
+        fontFamily: event.fontFamily,
+        clearFontFamily: event.fontFamily == null,
+      ),
+    );
   }
 
   void _onAlignmentChanged(
@@ -231,10 +236,7 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     );
   }
 
-  void _onImageAdded(
-    DiaryFormImageAdded event,
-    Emitter<DiaryFormState> emit,
-  ) {
+  void _onImageAdded(DiaryFormImageAdded event, Emitter<DiaryFormState> emit) {
     emit(state.copyWith(images: [...state.images, event.imagePath]));
   }
 
@@ -280,8 +282,9 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     DiaryFormOverlayImageRemoved event,
     Emitter<DiaryFormState> emit,
   ) {
-    final updated =
-        state.overlayImages.where((img) => img.id != event.id).toList();
+    final updated = state.overlayImages
+        .where((img) => img.id != event.id)
+        .toList();
     final clearSelection = state.selectedOverlayImageId == event.id;
     emit(
       state.copyWith(
@@ -353,10 +356,7 @@ class DiaryFormBloc extends Bloc<DiaryFormEvent, DiaryFormState> {
     final updated = state.stickers.where((s) => s.id != event.id).toList();
     final clearSelection = state.selectedStickerId == event.id;
     emit(
-      state.copyWith(
-        stickers: updated,
-        clearSelectedSticker: clearSelection,
-      ),
+      state.copyWith(stickers: updated, clearSelectedSticker: clearSelection),
     );
   }
 
