@@ -40,6 +40,33 @@ import 'package:flutter/material.dart';
 /// double-tap on the same tile can't push [onTap]'s destination route
 /// twice — see [DebouncedTap]'s doc comment for why this was needed
 /// app-wide, not just here.
+///
+/// RESPONSIVE NOTES:
+/// This widget is rendered inside [HomePage]'s day-grouped list, which
+/// (as of the responsive pass on that file) now hands this widget's
+/// parent `Row` a width computed from the *actual* space available to
+/// that row on the current device/window — not an assumed full-screen
+/// width. Two consequences for this file specifically:
+///
+/// 1. The date column (`showDateColumn: true` case) has a fixed pixel
+///    width here, but that width interacts with system text-scale: at
+///    large accessibility text sizes, "31" (day-of-month) or a 3-letter
+///    weekday abbreviation can grow wider than the column while a
+///    plain `Text` has no fallback other than to clip/wrap unexpectedly.
+///    [MediaQuery.textScalerOf] is used (a screen-global fact — no
+///    per-widget LayoutBuilder constraint can tell this widget "the
+///    user turned on large text", only MediaQuery can) to widen that
+///    column proportionally so the numerals/weekday keep fitting rather
+///    than overflowing past their `SizedBox`.
+/// 2. The mood-label `Row` (emoji + uppercase label + spacer + favorite
+///    icon) previously had no wrap/shrink fallback: a long mood label
+///    on a narrow card had nothing stopping a horizontal overflow. It's
+///    now wrapped in `Flexible` with an ellipsis fallback, so on a
+///    narrow card (small phone, or split-screen) a long label degrades
+///    to a truncated label instead of an overflow error — this mirrors
+///    how the preview text below it already truncates via
+///    maxLines/overflow, so the whole card now degrades consistently
+///    under space pressure instead of just the preview line doing so.
 class DiaryListItem extends StatelessWidget {
   final DiaryEntry entry;
   final VoidCallback onTap;
@@ -78,6 +105,15 @@ class DiaryListItem extends StatelessWidget {
   static const String _objectReplacementChar = '\uFFFC';
 
   static final RegExp _whitespaceRun = RegExp(r'\s+');
+
+  /// Base date-column width at 1.0x text scale. Actual rendered width
+  /// scales up from this with [MediaQuery.textScalerOf] (see [build]),
+  /// clamped to a sane ceiling so an extreme system text size widens
+  /// the column enough to fit its content without letting it balloon
+  /// far enough to meaningfully steal space back from the card next to
+  /// it.
+  static const double _dateColumnBaseWidth = 56.0;
+  static const double _dateColumnMaxWidth = 80.0;
 
   /// Removes every [_objectReplacementChar] from [raw], collapses any
   /// whitespace left behind where an embed used to sit (so removing an
@@ -121,6 +157,18 @@ class DiaryListItem extends StatelessWidget {
       color: onCardColor,
     );
 
+    // Screen-global accessibility fact (system text-scale factor),
+    // read once here rather than deep inside a nested builder — this
+    // is exactly what MediaQuery is for per current Flutter responsive
+    // guidance (global device-level facts), as opposed to LayoutBuilder
+    // (which answers "how much space do I have", not "did the user
+    // turn on large text").
+    final textScaleFactor = MediaQuery.textScalerOf(context).scale(1.0);
+    final dateColumnWidth = (_dateColumnBaseWidth * textScaleFactor).clamp(
+      _dateColumnBaseWidth,
+      _dateColumnMaxWidth,
+    );
+
     final card = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -133,27 +181,35 @@ class DiaryListItem extends StatelessWidget {
           Row(
             children: [
               if (entry.mood != null) ...[
-                Text(
-                  entry.mood!.emoji,
-                  style: const TextStyle(fontSize: 14),
-                ),
+                Text(entry.mood!.emoji, style: const TextStyle(fontSize: 14)),
                 const SizedBox(width: 4),
-                Text(
-                  entry.mood!.label.toUpperCase(),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: onCardColor,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
+                // Flexible + ellipsis: without this, a long mood label
+                // (or the same label at a large system text-scale
+                // factor) had nothing to stop this Row from overflowing
+                // horizontally on a narrow card — there was no
+                // wrap/shrink fallback at all on the label itself, only
+                // on the preview text further down. Wrapping just the
+                // label (not the emoji or the trailing favorite icon,
+                // both of which are fixed-size and should never be the
+                // thing that shrinks) means space pressure is absorbed
+                // by truncating the label text first, which is the
+                // least visually disruptive place for it to happen.
+                Flexible(
+                  child: Text(
+                    entry.mood!.label.toUpperCase(),
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: onCardColor,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
               ],
               const Spacer(),
               if (entry.isFavorite)
-                Icon(
-                  Icons.favorite,
-                  size: 14,
-                  color: colorScheme.primary,
-                ),
+                Icon(Icons.favorite, size: 14, color: colorScheme.primary),
             ],
           ),
           const SizedBox(height: 6),
@@ -185,10 +241,7 @@ class DiaryListItem extends StatelessWidget {
           Text.rich(
             TextSpan(
               children: [
-                TextSpan(
-                  text: sanitizedPreview.text,
-                  style: previewBaseStyle,
-                ),
+                TextSpan(text: sanitizedPreview.text, style: previewBaseStyle),
                 if (sanitizedPreview.imageCount > 0)
                   TextSpan(
                     // Leading space only when there's real text before
@@ -223,9 +276,17 @@ class DiaryListItem extends StatelessWidget {
           children: [
             // Date column — omitted when a parent list already renders
             // its own date tile (see [showDateColumn] doc above).
+            //
+            // Width is now dateColumnWidth (base 56, scaled up to a
+            // clamped max of 80 at large system text sizes) rather than
+            // a bare fixed 56 — see the class-level RESPONSIVE NOTES
+            // doc and the [_dateColumnBaseWidth]/[_dateColumnMaxWidth]
+            // fields above for why a fixed width risked the day number
+            // or weekday abbreviation clipping/overflowing once the
+            // user scales up system text.
             if (showDateColumn) ...[
               SizedBox(
-                width: 56,
+                width: dateColumnWidth,
                 child: Column(
                   children: [
                     Text(

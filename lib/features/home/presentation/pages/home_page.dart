@@ -44,6 +44,26 @@ import '../bloc/diary_list/diary_list_state.dart';
 /// see [MainShell._openCreateEntry]'s sibling wiring for the FAB, and
 /// the analogous `onTap: () => _onTabTapped(0)` passed down for this
 /// callback.
+///
+/// RESPONSIVE NOTES (read before touching layout constants below):
+/// Every dimension that used to be a bare `const double` sized for a
+/// single "typical phone" reference size has been rewritten to derive
+/// from either [MediaQuery] (for screen-wide decisions: overall
+/// viewport height/width, text scale factor, safe-area insets — things
+/// no single widget lower in the tree can see on its own) or
+/// [LayoutBuilder] (for anything that instead depends on the space a
+/// *specific* widget/row has actually been given, which MediaQuery
+/// cannot know — it only reports the window's size, not what a parent
+/// further up the tree decided to hand down). This split follows the
+/// current (2026) Flutter guidance: MediaQuery for global/device-level
+/// facts, LayoutBuilder for component-level available space, with
+/// breakpoint math centralized rather than repeated ad hoc at each call
+/// site. See [_ResponsiveMetrics] below for the centralized breakpoint
+/// logic. Percentage-of-screen-width sizing (e.g. "width * 0.3") is
+/// deliberately avoided per that same guidance — it scales a number,
+/// but doesn't respect the actual content or intent behind it, so
+/// clamped ranges are used instead of raw fractions wherever a fraction
+/// is involved.
 class HomePage extends StatelessWidget {
   const HomePage({super.key, required this.onViewMoreInTimeline});
 
@@ -61,6 +81,97 @@ class HomePage extends StatelessWidget {
   }
 }
 
+/// Centralized breakpoint / clamp logic for this page.
+///
+/// Keeping every magic number that reacts to screen size in one place
+/// (rather than scattered `if (width > 600)` checks at each call site)
+/// is the single change most consistently called out across current
+/// Flutter responsive-design guidance — it's what actually keeps
+/// "responsive" maintainable instead of a pile of independent hacks
+/// that drift out of sync with each other over time.
+///
+/// Every method here is a pure function of the inputs it's given
+/// (never reads [BuildContext]/[MediaQuery] itself), so callers decide
+/// once, at the point they already have a [MediaQuery]/[LayoutBuilder]
+/// value in hand, and every derived number stays consistent with it.
+abstract final class _ResponsiveMetrics {
+  /// Clamps the diary header's expanded height so it never eats an
+  /// unreasonable share of the viewport.
+  ///
+  /// [preferredHeight] is the designer's original target (200, the
+  /// prior constant). [viewportHeight] is the *actual* screen height
+  /// for this device/orientation/window
+  /// ([MediaQuery.sizeOf(context).height] — a screen-global fact
+  /// LayoutBuilder's sliver constraints can't give us here, since a
+  /// [SliverAppBar]'s own constraints are just "how tall can you be",
+  /// not "how tall is the whole window").
+  ///
+  /// On a normal portrait phone (viewport height well over 700), this
+  /// returns [preferredHeight] unchanged — nothing changes for the
+  /// common case. It only kicks in on short view ports: a phone rotated
+  /// to landscape, a small device, a resizable desktop/web window
+  /// pulled short, or a split-screen pane — where a fixed 200px header
+  /// could otherwise leave too little (or negative) room for content
+  /// beneath it, which is the class of bug a fixed fullscreen-oriented
+  /// constant tends to produce on "some device" that isn't the one it
+  /// was tuned against.
+  static double diaryHeaderExpandedHeight({
+    required double preferredHeight,
+    required double viewportHeight,
+  }) {
+    final maxByViewport = viewportHeight * 0.28;
+    // Lower bound keeps FlexibleSpaceBar's title/back-affordance area
+    // usable even on the shortest view ports; upper bound is whichever
+    // of the design target or the viewport-scaled ceiling is smaller.
+    return preferredHeight.clamp(120.0, maxByViewport).toDouble();
+  }
+
+  /// Height of the pinned favorites-toggle bar.
+  ///
+  /// The prior implementation hardcoded this to 64 (12 top padding + 40
+  /// toggle height + 12 bottom padding) assuming the toggle's own
+  /// content — a Row of icon + text — always fits inside a 40px-tall
+  /// segment. That assumption silently breaks once the user has scaled
+  /// up system text size (Settings > Display > Font size on Android,
+  /// or Dynamic Type on iOS): [textScaleFactor] comes from
+  /// [MediaQuery.textScalerOf(context)], a screen-global accessibility
+  /// setting no single child widget can discover on its own, which is
+  /// exactly the kind of fact MediaQuery (not LayoutBuilder) is for.
+  ///
+  /// Scaling only the *toggle* portion (not the padding) keeps the
+  /// visual rhythm intact at 1.0x scale while still leaving headroom
+  /// once text grows.
+  static double pinnedFavoritesBarHeight({required double textScaleFactor}) {
+    const topPadding = 12.0;
+    const bottomPadding = 12.0;
+    const baseToggleHeight = 40.0;
+    final scaledToggleHeight =
+        baseToggleHeight * textScaleFactor.clamp(1.0, 1.3);
+    return topPadding + scaledToggleHeight + bottomPadding;
+  }
+
+  /// Width of a single segment in [_FavoritesFilterToggle], given the
+  /// width actually available to the toggle (from [LayoutBuilder] at
+  /// its call site — the toggle is centered inside a pinned header, so
+  /// its *available* width is the header's width, which is not
+  /// necessarily the full device width once other padding/insets are
+  /// accounted for; MediaQuery's raw screen width would overstate it).
+  ///
+  /// Clamped rather than left as a raw fraction of [availableWidth]:
+  /// - Floor of 84 keeps "Favorites" + its icon from clipping/wrapping
+  ///   even on the narrowest supported phone widths.
+  /// - Ceiling of 132 stops the toggle from stretching absurdly wide
+  ///   on a tablet/desktop window, where "half the available width"
+  ///   would otherwise produce a segment far wider than the label
+  ///   inside it needs.
+  static double favoritesToggleSegmentWidth({required double availableWidth}) {
+    // Two segments plus track padding on both sides and between them.
+    const trackPadding = 4.0;
+    final perSegmentBudget = (availableWidth - trackPadding * 2) / 2;
+    return perSegmentBudget.clamp(84.0, 132.0);
+  }
+}
+
 class _HomeView extends StatefulWidget {
   const _HomeView({required this.onViewMoreInTimeline});
 
@@ -71,7 +182,13 @@ class _HomeView extends StatefulWidget {
 }
 
 class _HomeViewState extends State<_HomeView> {
-  static const double _headerExpandedHeight = 200;
+  /// Design-time target for the header's expanded height. Actual
+  /// rendered height is derived from this via
+  /// [_ResponsiveMetrics.diaryHeaderExpandedHeight] in [build], which
+  /// clamps it against the real viewport height — see that method's
+  /// doc for why a bare constant here previously risked overflow-
+  /// adjacent layout breakage on short view ports.
+  static const double _headerExpandedHeightPreferred = 200;
 
   /// Home is a preview of the most recent entries, not the full diary.
   /// Only this many of [DiaryListState.visibleEntries] are ever grouped
@@ -122,6 +239,23 @@ class _HomeViewState extends State<_HomeView> {
     final colorScheme = Theme.of(context).colorScheme;
     final currentYear = DateTime.now().year;
 
+    // Screen-global facts read once here and threaded down, rather
+    // than re-querying MediaQuery deep in the tree per source
+    // guidance's note that every MediaQuery read is a potential
+    // rebuild dependency — reading once at the top and passing plain
+    // doubles/values down means a resize only rebuilds this single
+    // build(), not additionally whatever nested widgets would have
+    // held their own separate MediaQuery.of(context) calls.
+    final viewportSize = MediaQuery.sizeOf(context);
+    final textScaleFactor = MediaQuery.textScalerOf(context).scale(1.0);
+
+    final headerExpandedHeight = _ResponsiveMetrics.diaryHeaderExpandedHeight(
+      preferredHeight: _headerExpandedHeightPreferred,
+      viewportHeight: viewportSize.height,
+    );
+    final pinnedFavoritesBarHeight = _ResponsiveMetrics
+        .pinnedFavoritesBarHeight(textScaleFactor: textScaleFactor);
+
     return Scaffold(
       extendBodyBehindAppBar: headerImagePath != null,
       appBar:  headerImagePath == null?myAppbar(context, '', null):null,
@@ -130,7 +264,7 @@ class _HomeViewState extends State<_HomeView> {
         slivers: [
           if (headerImagePath != null)
             SliverAppBar(
-              expandedHeight: _headerExpandedHeight,
+              expandedHeight: headerExpandedHeight,
               centerTitle: true,
               // No back button on a tab root, and no theme-agnostic
               // elevation shadow riding on top of the header image.
@@ -172,11 +306,21 @@ class _HomeViewState extends State<_HomeView> {
                     // scroll offset — unlike a separate BackdropFilter widget
                     // positioned below the sliver, which only has whatever
                     // happens to be rendered there at that scroll position.
+                    //
+                    // Height derives from headerExpandedHeight (the
+                    // clamped, per-viewport value) rather than the old
+                    // bare _headerExpandedHeight constant, so this band
+                    // stays proportional to whatever height the header
+                    // actually ended up rendering at on this device —
+                    // on a short/landscape viewport where the header
+                    // was clamped down, the band shrinks with it
+                    // instead of overshooting a header that's no
+                    // longer 200px tall.
                     Positioned(
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      height: _headerExpandedHeight * 0.5,
+                      height: headerExpandedHeight * 0.5,
                       child: ShaderMask(
                         shaderCallback: (rect) => const LinearGradient(
                           begin: Alignment.topCenter,
@@ -220,10 +364,14 @@ class _HomeViewState extends State<_HomeView> {
                     // softening the blurred pixels into flat color at the
                     // very bottom rather than leaving softened-but-still-
                     // visible image detail right at the seam.
+                    //
+                    // Height likewise derives from headerExpandedHeight
+                    // rather than the old fixed constant, for the same
+                    // proportionality reason as the blur band above.
                     Align(
                       alignment: Alignment.bottomCenter,
                       child: Container(
-                        height: _headerExpandedHeight * 0.55,
+                        height: headerExpandedHeight * 0.55,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
@@ -253,14 +401,38 @@ class _HomeViewState extends State<_HomeView> {
             pinned: true,
             delegate: _PinnedFavoritesHeaderDelegate(
               backgroundColor: Colors.transparent,
+              // Height now scales with system text size (see
+              // _ResponsiveMetrics.pinnedFavoritesBarHeight) instead of
+              // a bare 64 that assumed 1.0x scale — prevents the
+              // toggle's own text/icon from clipping against this
+              // delegate's fixed minExtent/maxExtent when the user has
+              // large system font sizes on.
+              height: pinnedFavoritesBarHeight,
               child: BlocBuilder<DiaryListBloc, DiaryListState>(
                 builder: (context, state) {
                   return Center(
-                    child: _FavoritesFilterToggle(
-                      showFavoritesOnly: state.showFavoritesOnly,
-                      onChanged: (value) => context.read<DiaryListBloc>().add(
-                        FavoritesFilterChanged(value),
-                      ),
+                    // LayoutBuilder here (rather than reaching for
+                    // MediaQuery again) because what the toggle needs
+                    // to know is "how wide is the box this delegate
+                    // gave me", i.e. this widget's own parent-provided
+                    // constraints — not the device's overall screen
+                    // width, which could differ once the pinned
+                    // header's own horizontal padding/insets are
+                    // accounted for. This is the LayoutBuilder-vs-
+                    // MediaQuery distinction the responsive-design
+                    // sources consistently draw: MediaQuery answers
+                    // "how big is the window", LayoutBuilder answers
+                    // "how much room do I actually have here".
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return _FavoritesFilterToggle(
+                          showFavoritesOnly: state.showFavoritesOnly,
+                          availableWidth: constraints.maxWidth,
+                          onChanged: (value) => context
+                              .read<DiaryListBloc>()
+                              .add(FavoritesFilterChanged(value)),
+                        );
+                      },
                     ),
                   );
                 },
@@ -360,7 +532,12 @@ class _HomeViewState extends State<_HomeView> {
                     // draws full-height behind the bar; without this,
                     // the bottom-most entries would sit under its
                     // opaque surface. ~140 comfortably clears the bar's
-                    // total height (flat bar + FAB protrusion).
+                    // total height (flat bar + FAB protrusion) at
+                    // typical text scale; on very large system text
+                    // sizes the nav bar itself may grow too, but that
+                    // bar owns its own responsive sizing (out of scope
+                    // for this file) — this padding only needs to
+                    // clear it, not compute it.
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
                     sliver: SliverList.separated(
                       // +1 trailing slot for the "View more" row, only
@@ -380,32 +557,88 @@ class _HomeViewState extends State<_HomeView> {
                         return switch (row) {
                           _YearSeparatorRow(:final year) =>
                             _YearSeparatorLabel(year: year),
-                          _DayGroupRow(:final date, :final entries) => Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              DateTile(date: date),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
+                          _DayGroupRow(:final date, :final entries) =>
+                            // LayoutBuilder here rather than trusting a
+                            // bare Row: on an extremely narrow viewport
+                            // (a small phone in split-screen, or a
+                            // resizable desktop/web window pulled
+                            // narrow), the fixed-width DateTile column
+                            // plus its SizedBox gap could in principle
+                            // leave the Expanded card too little space
+                            // to lay out its own internal Row (mood
+                            // emoji + label) without that inner Row
+                            // itself overflowing horizontally — the
+                            // card's own text already clips safely via
+                            // maxLines/ellipsis, but a Row of
+                            // fixed-size children (icon + label) has no
+                            // such fallback on its own. Constraining
+                            // the date column's width relative to what
+                            // this specific row was actually given
+                            // (constraints.maxWidth, not the device's
+                            // overall MediaQuery width, which may
+                            // overstate it once outer list padding is
+                            // subtracted) keeps that from ever reducing
+                            // the card's Expanded share below a usable
+                            // floor.
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                const dateColumnGap = 12.0;
+                                const preferredDateColumnWidth = 50.0;
+                                // Reserve at least enough width for the
+                                // card to render its mood row without
+                                // squeezing below a usable minimum;
+                                // shrink the date column first since
+                                // its own content (a 2-digit day number
+                                // + short weekday abbreviation) tolerates
+                                // a narrower column better than the
+                                // card's Row of icon-plus-label content
+                                // does.
+                                const minCardWidth = 160.0;
+                                final maxDateColumnWidth =
+                                    constraints.maxWidth -
+                                    dateColumnGap -
+                                    minCardWidth;
+                                final dateColumnWidth =
+                                    preferredDateColumnWidth
+                                        .clamp(0.0, maxDateColumnWidth.clamp(0.0, preferredDateColumnWidth))
+                                        .toDouble();
+
+                                return Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
-                                    for (var i = 0; i < entries.length; i++)
-                                      ...[
-                                        if (i > 0)
-                                          const SizedBox(height: 8),
-                                        DiaryListItem(
-                                          entry: entries[i],
-                                          showDateColumn: false,
-                                          onTap: () => _openEntry(
-                                            context,
-                                            entries[i].id,
-                                          ),
-                                        ),
-                                      ],
+                                    SizedBox(
+                                      width: dateColumnWidth,
+                                      child: DateTile(date: date),
+                                    ),
+                                    const SizedBox(width: dateColumnGap),
+                                    Expanded(
+                                      child: Column(
+                                        children: [
+                                          for (
+                                            var i = 0;
+                                            i < entries.length;
+                                            i++
+                                          )
+                                            ...[
+                                              if (i > 0)
+                                                const SizedBox(height: 8),
+                                              DiaryListItem(
+                                                entry: entries[i],
+                                                showDateColumn: false,
+                                                onTap: () => _openEntry(
+                                                  context,
+                                                  entries[i].id,
+                                                ),
+                                              ),
+                                            ],
+                                        ],
+                                      ),
+                                    ),
                                   ],
-                                ),
-                              ),
-                            ],
-                          ),
+                                );
+                              },
+                            ),
                         };
                       },
                     ),
@@ -464,7 +697,7 @@ class _YearSeparatorLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Row(
-      mainAxisAlignment: .end,
+      mainAxisAlignment: MainAxisAlignment.end,
       children: [
         Text(
           '$year',
@@ -515,25 +748,32 @@ class _ViewMoreRow extends StatelessWidget {
 /// scaffold's surface) rather than a transparent one — once pinned,
 /// list items scroll underneath it, so it needs an opaque backing to
 /// avoid content showing through/behind the toggle.
+///
+/// [height] is now a constructor parameter rather than a bare
+/// `static const _height = 64` — the caller
+/// ([_HomeViewState.build]) computes it from
+/// [_ResponsiveMetrics.pinnedFavoritesBarHeight], which factors in the
+/// device's current system text-scale factor. minExtent/maxExtent are
+/// both set to this same value (as before, keeping the bar's height
+/// fixed *for a given text scale* rather than allowing it to shrink
+/// while pinned), so the only thing that changed is *what* that fixed
+/// value resolves to.
 class _PinnedFavoritesHeaderDelegate extends SliverPersistentHeaderDelegate {
   const _PinnedFavoritesHeaderDelegate({
     required this.child,
     required this.backgroundColor,
+    required this.height,
   });
 
   final Widget child;
   final Color backgroundColor;
-
-  // Fixed height for the pinned bar: 12 top padding + 40 toggle height
-  // + 12 bottom padding, matching the original SliverToBoxAdapter's
-  // spacing (12 / toggle / 12).
-  static const double _height = 64;
+  final double height;
 
   @override
-  double get minExtent => _height;
+  double get minExtent => height;
 
   @override
-  double get maxExtent => _height;
+  double get maxExtent => height;
 
   @override
   Widget build(
@@ -552,36 +792,52 @@ class _PinnedFavoritesHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _PinnedFavoritesHeaderDelegate oldDelegate) {
     return oldDelegate.child != child ||
-        oldDelegate.backgroundColor != backgroundColor;
+        oldDelegate.backgroundColor != backgroundColor ||
+        oldDelegate.height != height;
   }
 }
 
 /// A pill-shaped, two-option toggle ("All" / "Favorites") with an
 /// animated sliding capsule behind the selected label.
 ///
-/// Both segments are given an identical fixed width (rather than
-/// sizing to their own text/icon content), so the sliding capsule's
-/// position is always an exact, symmetric half of the track — no
-/// drift between "All" (shorter label) and "Favorites" (longer label
-/// with icon).
+/// Both segments are given an identical width (rather than sizing to
+/// their own text/icon content), so the sliding capsule's position is
+/// always an exact, symmetric half of the track — no drift between
+/// "All" (shorter label) and "Favorites" (longer label with icon).
+///
+/// That shared segment width is now [availableWidth]-driven (via
+/// [_ResponsiveMetrics.favoritesToggleSegmentWidth]) instead of a bare
+/// `108.0` constant. [availableWidth] is supplied by the caller from a
+/// [LayoutBuilder] wrapping this widget — deliberately *not* read here
+/// via `MediaQuery.of(context).size.width` (which the prior code did
+/// fetch into a local `size` variable but never actually used): the
+/// width this toggle needs to fit inside is however much room its
+/// *parent* (the pinned header, centered) handed it, which is not
+/// necessarily the same number as the full device screen width once
+/// that header's own padding/insets are subtracted — MediaQuery can't
+/// see that, only LayoutBuilder can.
 class _FavoritesFilterToggle extends StatelessWidget {
   const _FavoritesFilterToggle({
     required this.showFavoritesOnly,
+    required this.availableWidth,
     required this.onChanged,
   });
 
   final bool showFavoritesOnly;
+  final double availableWidth;
   final ValueChanged<bool> onChanged;
 
   static const _height = 40.0;
   static const _trackPadding = 4.0;
-  static const _segmentWidth = 108.0; // fixed, identical for both segments
   static const _radius = Radius.circular(_height / 2);
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    const trackWidth = _segmentWidth * 2 + _trackPadding * 2;
+    final segmentWidth = _ResponsiveMetrics.favoritesToggleSegmentWidth(
+      availableWidth: availableWidth,
+    );
+    final trackWidth = segmentWidth * 2 + _trackPadding * 2;
 
     return Container(
       height: _height,
@@ -594,16 +850,16 @@ class _FavoritesFilterToggle extends StatelessWidget {
       child: Stack(
         children: [
           // Sliding highlight capsule. Positioned with exact pixel
-          // offsets (0 vs. _segmentWidth) rather than Alignment, so it
+          // offsets (0 vs. segmentWidth) rather than Alignment, so it
           // always sits flush under whichever segment is active,
           // regardless of that segment's own content width.
           AnimatedPositioned(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
-            left: showFavoritesOnly ? _segmentWidth : 0,
+            left: showFavoritesOnly ? segmentWidth : 0,
             top: 0,
             bottom: 0,
-            width: _segmentWidth,
+            width: segmentWidth,
             child: Container(
               decoration: BoxDecoration(
                 color: colorScheme.surface,
@@ -625,6 +881,7 @@ class _FavoritesFilterToggle extends StatelessWidget {
                 label: 'All',
                 icon: null,
                 isSelected: !showFavoritesOnly,
+                segmentWidth: segmentWidth,
                 onTap: () => onChanged(false),
               ),
               _buildOption(
@@ -632,6 +889,7 @@ class _FavoritesFilterToggle extends StatelessWidget {
                 label: 'Favorites',
                 icon: Icons.favorite_rounded,
                 isSelected: showFavoritesOnly,
+                segmentWidth: segmentWidth,
                 onTap: () => onChanged(true),
               ),
             ],
@@ -646,6 +904,7 @@ class _FavoritesFilterToggle extends StatelessWidget {
     required String label,
     required IconData? icon,
     required bool isSelected,
+    required double segmentWidth,
     required VoidCallback onTap,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -654,7 +913,7 @@ class _FavoritesFilterToggle extends StatelessWidget {
         : colorScheme.onSurfaceVariant;
 
     return SizedBox(
-      width: _segmentWidth,
+      width: segmentWidth,
       height: double.infinity,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -673,7 +932,24 @@ class _FavoritesFilterToggle extends StatelessWidget {
                 Icon(icon, size: 15, color: foreground),
                 const SizedBox(width: 6),
               ],
-              Text(label),
+              // Flexible + ellipsis: at the narrowest clamped segment
+              // width (84px) combined with a large system text scale
+              // factor, "Favorites" could in principle still be tight;
+              // Flexible with ellipsis means that edge degrades to a
+              // clipped label with "…" rather than a Row-level
+              // horizontal overflow (a yellow/black striped overflow
+              // banner), which is strictly worse than a truncated word
+              // in a toggle whose two states are already visually
+              // distinguished by the sliding capsule position, icon
+              // presence, and color — the label text alone isn't the
+              // only cue.
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                ),
+              ),
             ],
           ),
         ),

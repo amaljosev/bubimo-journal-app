@@ -1168,7 +1168,11 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                           },
                         ),
                       ),
-                      DiaryBottomToolbar(
+                      
+                    ],
+                  ),
+                ),
+                DiaryBottomToolbar(
                         key: _toolbarKey,
                         controller: _quillController!,
                         editorFocusNode: _descriptionFocusNode,
@@ -1195,9 +1199,6 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                             _pickInlineImage(colorScheme),
                         onPanelRequested: _onPanelRequested,
                       ),
-                    ],
-                  ),
-                ),
                 _buildPanelOverlay(),
               ],
             ),

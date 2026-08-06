@@ -148,7 +148,6 @@ class _TimelineViewState extends State<_TimelineView>
     });
   }
 
-
   // ── Day cell builder ─────────────────────────────────────────────────
 
   static Widget _buildDayCell({
@@ -197,17 +196,19 @@ class _TimelineViewState extends State<_TimelineView>
     ).extension<BackgroundImageTheme>()?.imagePath;
 
     return Scaffold(
-      appBar:bgImagePath!=null?null: myAppbar(
-        context,
-        'Timeline',
-        IconPill(
-          onTap: _goToFavorites,
-          color: Colors.redAccent,
-          icon: Icons.favorite,
-          textColor: Colors.white,
-          label: '',
-        ),
-      ),
+      appBar: bgImagePath != null
+          ? null
+          : myAppbar(
+              context,
+              'Timeline',
+              IconPill(
+                onTap: _goToFavorites,
+                color: Colors.redAccent,
+                icon: Icons.favorite,
+                textColor: Colors.white,
+                label: '',
+              ),
+            ),
       body: BlocBuilder<DiaryListBloc, DiaryListState>(
         buildWhen: (previous, current) =>
             previous.status != current.status ||
@@ -331,7 +332,6 @@ class _TimelineViewState extends State<_TimelineView>
           );
         },
       ),
-      
     );
   }
 }
@@ -363,16 +363,27 @@ class _TimelineHeroAppBar extends StatelessWidget {
       expandedHeight: 200,
       collapsedHeight: 60,
       stretch: true,
-      surfaceTintColor: Colors.transparent,
+      surfaceTintColor: const Color.fromRGBO(0, 0, 0, 0),
       elevation: 0,
       automaticallyImplyLeading: false,
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 8.0),
+          child: IconPill(
+            onTap: onFavoritesTap,
+            color: Colors.redAccent,
+            icon: Icons.favorite,
+            label: '$favCount',
+            textColor: Colors.white,
+          ),
+        ),
+      ],
       flexibleSpace: LayoutBuilder(
         builder: (context, constraints) {
           final expandRatio = ((constraints.maxHeight - 60) / (200 - 60)).clamp(
             0.0,
             1.0,
           );
-          final isCollapsed = expandRatio < 0.15;
 
           return Stack(
             fit: StackFit.expand,
@@ -398,48 +409,6 @@ class _TimelineHeroAppBar extends StatelessWidget {
                     ),
                   ),
                 ),
-
-              // Collapsed bar
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: SizedBox(
-                    height: 60,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: AnimatedOpacity(
-                              opacity: isCollapsed ? 1.0 : 0.0,
-                              duration: const Duration(milliseconds: 200),
-                              child: Text(
-                                '${AppDateUtils.monthNameLong(focusedDay.month)} ${focusedDay.year}',
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: bgImagePath != null
-                                      ? theme.colorScheme.onSurface
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ),
-                          IconPill(
-                            onTap: onFavoritesTap,
-                            color: Colors.redAccent,
-                            icon: Icons.favorite,
-                            label: '$favCount',
-                            textColor: Colors.white,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
 
               // Expanded hero content
               Positioned(

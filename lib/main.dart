@@ -135,17 +135,22 @@ class DiaryApp extends StatelessWidget {
       ],
       child: BlocBuilder<AppThemeCubit, ThemeData>(
         builder: (context, themeData) {
-          return MaterialApp.router(
-            title: 'Journal App',
-            debugShowCheckedModeBanner: false,
-            theme: themeData,
-            routerConfig: appRouter,
-            localizationsDelegates: const [
-              FlutterQuillLocalizations.delegate,
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
+          return MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.0),
+          ),
+            child: MaterialApp.router(
+              title: 'Journal App',
+              debugShowCheckedModeBanner: false,
+              theme: themeData,
+              routerConfig: appRouter,
+              localizationsDelegates: const [
+                FlutterQuillLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+            ),
           );
         },
       ),

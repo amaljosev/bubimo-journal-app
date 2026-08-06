@@ -68,7 +68,7 @@ const Duration kFabReleaseDuration = ThemeDurations.standard;
 /// Width of the selection pill background sitting behind the active
 /// icon. Wider than it is tall so it reads as a squat rounded
 /// rectangle rather than a square.
-const double kPillWidth = 85.0;
+const double kPillWidth = 70.0;
 
 /// Height of the selection pill.
 const double kPillHeight = 50.0;
@@ -336,9 +336,11 @@ class _SelectionPill extends StatefulWidget {
 
 class _SelectionPillState extends State<_SelectionPill> {
   double? _lastKnownCenterX;
+  
 
   @override
   Widget build(BuildContext context) {
+    final size=MediaQuery.of(context).size;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final double? measured = widget.getTargetCenterX();
       if (measured != null && measured != _lastKnownCenterX && mounted) {
@@ -351,13 +353,14 @@ class _SelectionPillState extends State<_SelectionPill> {
     if (centerX == null) {
       return const SizedBox.shrink();
     }
+    
 
     return AnimatedPositioned(
       duration: kPillSlideDuration,
       curve: kPillSlideCurve,
-      left: centerX - kPillWidth / 2,
+      left: centerX - size.width*0.19 / 2,
       top: (kNavBarHeight - kPillHeight) / 2,
-      width: kPillWidth,
+      width: size.width*0.19,
       height: kPillHeight,
       child: DecoratedBox(
         decoration: BoxDecoration(

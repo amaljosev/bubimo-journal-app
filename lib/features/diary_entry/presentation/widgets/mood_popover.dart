@@ -90,6 +90,7 @@ class _MoodPopoverContent extends StatelessWidget {
   static const double _cardWidth = 320;
   static const double _pointerSize = 14;
   static const double _pointerRightInset = 28;
+  static const double _edgeMargin = 12;
 
   @override
   Widget build(BuildContext context) {
@@ -98,9 +99,23 @@ class _MoodPopoverContent extends StatelessWidget {
     final bubbleColor =
         isDark ? const Color(0xFF3A2E33) : const Color(0xFFFCE9EC);
 
-    // Clamp the card so it never runs off the left/right edges.
-    double left = anchorCenterX + _pointerRightInset - (_cardWidth - 60);
-    left = left.clamp(12.0, overlaySize.width - _cardWidth - 12.0);
+    // On screens narrower than `_cardWidth + 2 * _edgeMargin` (small
+    // phones, split-screen, etc.), the card itself has to shrink to
+    // fit — otherwise the left/right clamp below has no valid range at
+    // all (lower bound > upper bound), which is what was crashing this
+    // popover with `ArgumentError (Invalid argument(s): 12.0)`.
+    final cardWidth = (overlaySize.width - _edgeMargin * 2)
+        .clamp(0.0, _cardWidth)
+        .toDouble();
+
+    // Clamp the card so it never runs off the left/right edges. The
+    // upper bound is floored at `_edgeMargin` so it's never less than
+    // the lower bound — `num.clamp` throws if `lower > upper`, which
+    // is exactly what happened before `cardWidth` was capped to the
+    // available width above.
+    double left = anchorCenterX + _pointerRightInset - (cardWidth - 60);
+    final maxLeft = overlaySize.width - cardWidth - _edgeMargin;
+    left = left.clamp(_edgeMargin, maxLeft < _edgeMargin ? _edgeMargin : maxLeft);
     final pointerCenterOffsetFromLeft =
         (anchorCenterX - _pointerRightInset / 2) - left;
 
@@ -111,7 +126,7 @@ class _MoodPopoverContent extends StatelessWidget {
         Positioned(
           left: left,
           top: top,
-          width: _cardWidth,
+          width: cardWidth,
           child: Material(
             color: Colors.transparent,
             child: Column(
@@ -121,7 +136,12 @@ class _MoodPopoverContent extends StatelessWidget {
                 Padding(
                   padding: EdgeInsets.only(
                     left: (pointerCenterOffsetFromLeft - _pointerSize / 2)
-                        .clamp(16.0, _cardWidth - _pointerSize - 16.0),
+                        .clamp(
+                          16.0,
+                          (cardWidth - _pointerSize - 16.0) < 16.0
+                              ? 16.0
+                              : cardWidth - _pointerSize - 16.0,
+                        ),
                   ),
                   child: CustomPaint(
                     size: const Size(_pointerSize, 8),

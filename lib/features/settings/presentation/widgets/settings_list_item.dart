@@ -45,7 +45,7 @@ class SettingsSection extends StatelessWidget {
                     height: 1,
                     thickness: 1,
                     indent: 56,
-                    color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.2),
                   ),
               ],
             ],
@@ -93,7 +93,7 @@ class SettingsListItem extends StatelessWidget {
           Icon(
             icon,
             size: 22,
-            color: isEnabled ? colorScheme.onSurface : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+            color: isEnabled ? colorScheme.primary : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
           ),
           const SizedBox(width: 16),
           Expanded(

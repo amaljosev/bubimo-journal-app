@@ -319,52 +319,55 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     // of the earlier redesign holds regardless of how its panels are
     // presented.
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.only(left: 10.0, top: 10.0, bottom: 10.0),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(ThemeRadii.xxl),
-            bottomLeft: Radius.circular(ThemeRadii.xxl),
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.onPrimary,
-              boxShadow: [
-                BoxShadow(
-                  color: theme.colorScheme.shadow.withValues(alpha: 0.10),
-                  blurRadius: 20,
-                  offset: const Offset(0, -6),
-                ),
-              ],
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 10.0, top: 10.0, bottom: 10.0),
+          child: ClipRRect(
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(ThemeRadii.xxl),
+              bottomLeft: Radius.circular(ThemeRadii.xxl),
             ),
-            child: SizedBox(
-              height: _barHeight,
-
-              child: AnimatedSwitcher(
-                duration: ThemeDurations.fast,
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                child: hasSelection
-                    ? _SelectionToolsRow(
-                        key: const ValueKey('selection'),
-                        controller: widget.controller,
-                        activePanel: _activePanel,
-                        onOpenStylePicker: _openStylePicker,
-                        onOpenColorPanel: _openSelectionColorPanel,
-                      )
-                    : _CommonToolsRow(
-                        key: const ValueKey('common'),
-                        controller: widget.controller,
-                        activePanel: _activePanel,
-                        onOpenTextFormatPanel: _openTextFormatPanel,
-                        onOpenListPanel: _openListPanel,
-                        onOpenFontPanel: _openFontPanel,
-                        onOpenTextColorPanel: _openTextColorPanel,
-                        onBackgroundPressed: widget.onBackgroundPressed,
-                        onStickerPressed: widget.onStickerPressed,
-                        onOverlayImagePressed: widget.onOverlayImagePressed,
-                        onInlineImagePressed: widget.onInlineImagePressed,
-                      ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onPrimary,
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.shadow.withValues(alpha: 0.10),
+                    blurRadius: 20,
+                    offset: const Offset(0, -6),
+                  ),
+                ],
+              ),
+              child: SizedBox(
+                height: _barHeight,
+        
+                child: AnimatedSwitcher(
+                  duration: ThemeDurations.fast,
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  child: hasSelection
+                      ? _SelectionToolsRow(
+                          key: const ValueKey('selection'),
+                          controller: widget.controller,
+                          activePanel: _activePanel,
+                          onOpenStylePicker: _openStylePicker,
+                          onOpenColorPanel: _openSelectionColorPanel,
+                        )
+                      : _CommonToolsRow(
+                          key: const ValueKey('common'),
+                          controller: widget.controller,
+                          activePanel: _activePanel,
+                          onOpenTextFormatPanel: _openTextFormatPanel,
+                          onOpenListPanel: _openListPanel,
+                          onOpenFontPanel: _openFontPanel,
+                          onOpenTextColorPanel: _openTextColorPanel,
+                          onBackgroundPressed: widget.onBackgroundPressed,
+                          onStickerPressed: widget.onStickerPressed,
+                          onOverlayImagePressed: widget.onOverlayImagePressed,
+                          onInlineImagePressed: widget.onInlineImagePressed,
+                        ),
+                ),
               ),
             ),
           ),
