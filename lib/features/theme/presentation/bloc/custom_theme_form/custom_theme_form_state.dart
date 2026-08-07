@@ -49,8 +49,8 @@ class CustomThemeFormState extends Equatable {
     this.fontFamily = 'Poppins',
     this.headerImagePath,
     this.errorMessage,
-  })  : lightPalette = lightPalette ?? _defaultLightPalette,
-        darkPalette = darkPalette ?? _defaultDarkPalette;
+  }) : lightPalette = lightPalette ?? _defaultLightPalette,
+       darkPalette = darkPalette ?? _defaultDarkPalette;
 
   /// Default Light Mode palette — matches the previous hard-coded
   /// defaults on this state (Dusk-like violet), used when a brand-new
@@ -183,14 +183,14 @@ class CustomThemeFormState extends Equatable {
 
   @override
   List<Object?> get props => [
-        status,
-        editingThemeId,
-        name,
-        isDark,
-        lightPalette,
-        darkPalette,
-        fontFamily,
-        headerImagePath,
-        errorMessage,
-      ];
+    status,
+    editingThemeId,
+    name,
+    isDark,
+    lightPalette,
+    darkPalette,
+    fontFamily,
+    headerImagePath,
+    errorMessage,
+  ];
 }

@@ -156,18 +156,20 @@ class _CustomThemeScreenViewState extends State<_CustomThemeScreenView> {
                 headerImagePath: state.headerImagePath,
               ),
               const SizedBox(height: 24),
-              ThemeNameField(
-                controller: _nameController,
-                onChanged: (value) => context
-                    .read<CustomThemeFormBloc>()
-                    .add(CustomThemeNameChanged(value)),
-              ),
-              const SizedBox(height: 20),
+              
               _DarkModeSwitcher(
                 isDark: state.isDark,
                 onChanged: (value) => context
                     .read<CustomThemeFormBloc>()
                     .add(CustomThemeDarkModeToggled(value)),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Font'),
+                subtitle: Text(state.fontFamily),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _openFontPicker(context, state.fontFamily),
               ),
               const SizedBox(height: 20),
               HeaderImagePickerField(
@@ -258,12 +260,12 @@ class _CustomThemeScreenViewState extends State<_CustomThemeScreenView> {
                 onTap: () => _openTextColorPicker(context, state),
               ),
               const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Font'),
-                subtitle: Text(state.fontFamily),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _openFontPicker(context, state.fontFamily),
+              
+              ThemeNameField(
+                controller: _nameController,
+                onChanged: (value) => context
+                    .read<CustomThemeFormBloc>()
+                    .add(CustomThemeNameChanged(value)),
               ),
               const SizedBox(height: 28),
               FilledButton(

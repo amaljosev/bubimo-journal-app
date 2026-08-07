@@ -3,6 +3,8 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/error/failures.dart';
+import '../../../../core/utils/downloads_directory_resolver.dart';
 import '../../domain/entities/export_result.dart';
 import '../../domain/entities/import_result.dart';
 import '../../domain/entities/pdf_export_result.dart';
@@ -51,12 +53,7 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
     final result = await exportDiaryBackup();
 
     result.match(
-      (failure) => emit(
-        state.copyWith(
-          status: BackupStatus.failure,
-          errorMessage: failure.message,
-        ),
-      ),
+      (failure) => _emitFailureOrCancelled(failure, emit),
       (exportResult) => emit(
         state.copyWith(
           status: BackupStatus.exportSuccess,
@@ -110,17 +107,36 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
     final result = await exportDiaryPdf();
 
     result.match(
-      (failure) => emit(
-        state.copyWith(
-          status: BackupStatus.failure,
-          errorMessage: failure.message,
-        ),
-      ),
+      (failure) => _emitFailureOrCancelled(failure, emit),
       (pdfExportResult) => emit(
         state.copyWith(
           status: BackupStatus.pdfExportSuccess,
           pdfExportResult: pdfExportResult,
         ),
+      ),
+    );
+  }
+
+  /// Routes a failed export/import [Either] to the right state.
+  ///
+  /// [ExportCancelledException]'s message (surfaced here as
+  /// [failure.message] after passing through
+  /// [BackupRepositoryImpl]/[PdfExportRepositoryImpl]'s
+  /// `ExportCancelledException` catch clause) means the user simply
+  /// closed the save-file dialog — not a real error, so this quietly
+  /// returns to idle instead of surfacing a red failure banner the way
+  /// every other [Failure] does. String-matching the message is a bit
+  /// fragile, but avoids introducing a dedicated Failure subclass just
+  /// for this one bloc to special-case.
+  void _emitFailureOrCancelled(Failure failure, Emitter<BackupState> emit) {
+    if (failure.message == kExportCancelledMessage) {
+      emit(state.cleared(status: BackupStatus.idle));
+      return;
+    }
+    emit(
+      state.copyWith(
+        status: BackupStatus.failure,
+        errorMessage: failure.message,
       ),
     );
   }

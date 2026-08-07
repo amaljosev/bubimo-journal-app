@@ -93,7 +93,7 @@ class DiaryListItem extends StatelessWidget {
   /// are plain strings by the time they reach this widget, so if the
   /// entry's rich body contained an inline image, this is what shows up
   /// in that string at the image's position — Flutter's default `Text`
-  /// then renders it as a visible ".notdef"/tofu box (the dashed "OBJ"
+  /// then renders it as a visible ".not def"/tofu box (the dashed "OBJ"
   /// glyph), since no font has a real glyph for it and a bare `Text`
   /// widget has no way to know it should be substituted with something
   /// else instead.
@@ -180,33 +180,41 @@ class DiaryListItem extends StatelessWidget {
         children: [
           Row(
             children: [
-              if (entry.mood != null) ...[
-                Text(entry.mood!.emoji, style: const TextStyle(fontSize: 14)),
-                const SizedBox(width: 4),
-                // Flexible + ellipsis: without this, a long mood label
-                // (or the same label at a large system text-scale
-                // factor) had nothing to stop this Row from overflowing
-                // horizontally on a narrow card — there was no
-                // wrap/shrink fallback at all on the label itself, only
-                // on the preview text further down. Wrapping just the
-                // label (not the emoji or the trailing favorite icon,
-                // both of which are fixed-size and should never be the
-                // thing that shrinks) means space pressure is absorbed
-                // by truncating the label text first, which is the
-                // least visually disruptive place for it to happen.
-                Flexible(
-                  child: Text(
-                    entry.mood!.label.toUpperCase(),
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: onCardColor,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
-                    ),
+              if (entry.mood != null)
+                Expanded(
+                  child: Row(
+                    children: [
+                      Text(
+                        entry.mood!.emoji,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(width: 4),
+                      // Flexible + ellipsis: without this, a long mood label
+                      // (or the same label at a large system text-scale
+                      // factor) had nothing to stop this Row from overflowing
+                      // horizontally on a narrow card — there was no
+                      // wrap/shrink fallback at all on the label itself, only
+                      // on the preview text further down. Wrapping just the
+                      // label (not the emoji or the trailing favorite icon,
+                      // both of which are fixed-size and should never be the
+                      // thing that shrinks) means space pressure is absorbed
+                      // by truncating the label text first, which is the
+                      // least visually disruptive place for it to happen.
+                      Flexible(
+                        child: Text(
+                          entry.mood!.label.toUpperCase(),
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: onCardColor,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
               const Spacer(),
               if (entry.isFavorite)
                 Icon(Icons.favorite, size: 14, color: colorScheme.primary),
@@ -235,7 +243,7 @@ class DiaryListItem extends StatelessWidget {
           // any other trailing word would be. No special-cased "always
           // show the indicator" logic is added: this preview was
           // already routinely truncated before this change (see the
-          // "iweruyui"/"opiu" entries in the reported screenshot, both
+          // "iw er u ui"/"op iu" entries in the reported screenshot, both
           // already ending in "…"), so letting the indicator truncate
           // like everything else is consistent, not a regression.
           Text.rich(

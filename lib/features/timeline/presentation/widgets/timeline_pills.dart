@@ -114,14 +114,17 @@ class LegendItem extends StatelessWidget {
     final theme = Theme.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
+      spacing: 6,
       children: [
         child,
-        const SizedBox(width: 6),
+       
         Text(
           label,
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );

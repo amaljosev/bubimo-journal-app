@@ -1,10 +1,8 @@
 // lib/features/backup/data/datasources/pdf_export_data_source.dart
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_quill/flutter_quill.dart' as quill;
-import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
@@ -20,7 +18,7 @@ const String kPdfExportFileExtension = '.pdf';
 /// entry — date, title, and body text ONLY. No photos, stickers,
 /// backgrounds, or styling are included, by explicit design: this is a
 /// document meant to be read, shared, or printed, not a backup (see
-/// `BackupLocalDataSource` for the actual round-trippable `.bubimo`
+/// `BackupLocalDataSource` for the actual round-trip able `.bubimo`
 /// format, which DOES carry every image). Mixing the two concerns into
 /// one file format would blur what each is actually for.
 ///
@@ -68,14 +66,16 @@ class PdfExportDataSource {
 
     final bytes = await document.save();
 
-    final (directory, savedToPublicDownloads) =
-        await resolveDownloadsDirectory(fallbackSubfolderName: 'exported_files');
     final fileName = _generateFileName();
-    final file = File(p.join(directory.path, fileName));
-    await file.writeAsBytes(bytes);
+    final (filePath, savedToPublicDownloads) = await saveToDownloads(
+      bytes: bytes,
+      fileName: fileName,
+      allowedExtensions: const ['pdf'],
+      dialogTitle: 'Save PDF',
+    );
 
     return PdfExportResult(
-      filePath: file.path,
+      filePath: filePath,
       entryCount: entries.length,
       savedToPublicDownloads: savedToPublicDownloads,
     );

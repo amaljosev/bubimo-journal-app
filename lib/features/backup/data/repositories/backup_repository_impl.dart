@@ -4,6 +4,7 @@ import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
+import '../../../../core/utils/downloads_directory_resolver.dart';
 import '../../domain/entities/export_result.dart';
 import '../../domain/entities/import_result.dart';
 import '../../domain/repositories/backup_repository.dart';
@@ -29,6 +30,13 @@ class BackupRepositoryImpl implements BackupRepository {
     try {
       final result = await localDataSource.createBackup();
       return Right(result);
+    } on ExportCancelledException catch (e) {
+      // Not a real failure — the user just closed the save dialog. Kept
+      // as its own catch (rather than falling into the generic one
+      // below, which prefixes "Failed to create backup: ") so
+      // BackupBloc can recognize kExportCancelledMessage exactly and
+      // quietly return to idle instead of showing a red error.
+      return Left(ImportExportFailure(e.toString()));
     } on MediaStorageException catch (e) {
       return Left(MediaStorageFailure(e.message));
     } catch (e) {

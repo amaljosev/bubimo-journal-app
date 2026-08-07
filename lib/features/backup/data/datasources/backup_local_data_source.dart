@@ -164,14 +164,18 @@ class BackupLocalDataSource {
   Future<ExportResult> createBackup() async {
     final built = await buildBackupArchive();
 
-    final (directory, savedToPublicDownloads) =
-        await resolveDownloadsDirectory();
     final fileName = _generateExportFileName();
-    final file = File(p.join(directory.path, fileName));
-    await file.writeAsBytes(built.bytes);
+    final (filePath, savedToPublicDownloads) = await saveToDownloads(
+      bytes: built.bytes,
+      fileName: fileName,
+      // A `.bubimo` file is a plain zip archive underneath — see this
+      // class's doc comment on kBackupFileExtension.
+      allowedExtensions: [kBackupFileExtension.replaceFirst('.', '')],
+      dialogTitle: 'Save backup',
+    );
 
     return ExportResult(
-      filePath: file.path,
+      filePath: filePath,
       entryCount: built.entryCount,
       fileSizeBytes: built.bytes.length,
       savedToPublicDownloads: savedToPublicDownloads,

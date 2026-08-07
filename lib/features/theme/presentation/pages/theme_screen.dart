@@ -137,36 +137,62 @@ class _ThemeScreenState extends State<ThemeScreen>
         final activeTheme = getIt<AppThemeCubit>().currentTheme;
 
         return Scaffold(
-          appBar: myAppbar(context, 'Themes',null),
-          body: Column(
-            children: [
-              if (activeTheme != null) CurrentThemeHeader(theme: activeTheme),
-              ResetToDefaultButton(
-                isEnabled: !state.isActionInProgress,
-                onPressed: () => context.read<ThemeListBloc>().add(
-                  const ThemeListResetToDefaultRequested(),
+          appBar: myAppbar(context, 'Themes', null),
+          // NestedScrollView replaces the old Column + Expanded(TabBarView).
+          // That layout gave the header (theme card / reset button / tab
+          // bar) a fixed footprint and only let the *inner* list scroll —
+          // fine at default text size, but at larger accessibility text
+          // scales or on short screens the fixed footprint alone can
+          // exceed the viewport, and there was no way to reach the
+          // content that got pushed off (or clipped with an overflow
+          // error). NestedScrollView is the widget built for this exact
+          // shape: non-list header content plus a TabBarView whose tabs
+          // each need their own scrollable list, all coordinated as one
+          // continuous scroll. A plain CustomScrollView can't host a
+          // TabBarView directly (it isn't a sliver and won't shrink-wrap),
+          // so NestedScrollView is the correct fit here, not just "a"
+          // fit.
+          body: NestedScrollView(
+            headerSliverBuilder: (context, innerBoxIsScrolled) {
+              return [
+                SliverToBoxAdapter(
+                  child: Column(
+                    // Required: SliverToBoxAdapter gives its child an
+                    // unbounded max height, so this Column must size
+                    // itself to its children (min) rather than try to
+                    // fill the available space (max, the default).
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (activeTheme != null)
+                        CurrentThemeHeader(theme: activeTheme),
+                      ResetToDefaultButton(
+                        isEnabled: !state.isActionInProgress,
+                        onPressed: () => context.read<ThemeListBloc>().add(
+                          const ThemeListResetToDefaultRequested(),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                        child: _ModernTabBar(controller: _tabController),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                child: _ModernTabBar(controller: _tabController),
-              ),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _BuiltInThemesTab(state: state),
-                    _CustomThemesTab(
-                      state: state,
-                      isNavigating: _isNavigatingToCustomThemeScreen,
-                      onEdit: (theme) => _openEditCustomTheme(context, theme),
-                      onDelete: (theme) => _confirmDelete(context, theme),
-                      onAdd: () => _openCreateCustomTheme(context),
-                    ),
-                  ],
+              ];
+            },
+            body: TabBarView(
+              controller: _tabController,
+              children: [
+                _BuiltInThemesTab(state: state),
+                _CustomThemesTab(
+                  state: state,
+                  isNavigating: _isNavigatingToCustomThemeScreen,
+                  onEdit: (theme) => _openEditCustomTheme(context, theme),
+                  onDelete: (theme) => _confirmDelete(context, theme),
+                  onAdd: () => _openCreateCustomTheme(context),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -349,28 +375,53 @@ class _BuiltInThemesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (state.status == ThemeListStatus.loading) {
-      return const Center(child: CircularProgressIndicator());
+      // Still a CustomScrollView (not a bare Center) so this tab is a
+      // valid, always-scrollable body for the NestedScrollView — if a
+      // huge text scale ever makes even the spinner + header overflow,
+      // this can still be scrolled to instead of clipping.
+      return const CustomScrollView(
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ],
+      );
     }
 
-    return ListView.builder(
-      padding: EdgeInsets.fromLTRB(
-        0,
-        8,
-        0,
-        24 + MediaQuery.of(context).padding.bottom,
-      ),
-      itemCount: state.builtInThemes.length,
-      itemBuilder: (context, index) {
-        final theme = state.builtInThemes[index];
-        return BuiltInThemeTile(
-          theme: theme,
-          isActive: theme.id == state.activeThemeId,
-          isEnabled: !state.isActionInProgress,
-          onTap: () => context.read<ThemeListBloc>().add(
-            ThemeListThemeApplied(theme.id),
+    // CustomScrollView + SliverList is the sliver-level equivalent of
+    // the old ListView.builder (ListView.builder is this exact same
+    // pair under the hood) — needed here because NestedScrollView's
+    // body must be built from slivers to participate in the shared
+    // outer/inner scroll coordination.
+    return CustomScrollView(
+      key: const PageStorageKey('built_in_themes_tab'),
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            0,
+            8,
+            0,
+            24 + MediaQuery.of(context).padding.bottom,
           ),
-        );
-      },
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final theme = state.builtInThemes[index];
+                return BuiltInThemeTile(
+                  theme: theme,
+                  isActive: theme.id == state.activeThemeId,
+                  isEnabled: !state.isActionInProgress,
+                  onTap: () => context.read<ThemeListBloc>().add(
+                    ThemeListThemeApplied(theme.id),
+                  ),
+                );
+              },
+              childCount: state.builtInThemes.length,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -393,7 +444,14 @@ class _CustomThemesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (state.status == ThemeListStatus.loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const CustomScrollView(
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ],
+      );
     }
 
     // Disabling the button/tiles while a push is in flight (rather than
@@ -402,49 +460,67 @@ class _CustomThemesTab extends StatelessWidget {
     // instead of silently swallowing the extra taps.
     final canNavigate = !isNavigating;
 
-    return Column(
-      children: [
-        Padding(
+    return CustomScrollView(
+      key: const PageStorageKey('custom_themes_tab'),
+      slivers: [
+        // The "Add Custom Theme" button now scrolls with this tab's
+        // content instead of sitting in a fixed slot above it — it's
+        // tab-specific, so it belongs inside this tab's own scroll
+        // region, same as the list below it.
+        SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: FilledButton.icon(
-            onPressed: (state.canAddCustomTheme && canNavigate) ? onAdd : null,
-            icon: const Icon(Icons.add),
-            label: Text(
-              state.canAddCustomTheme
-                  ? 'Add Custom Theme'
-                  : 'Custom theme limit reached (3/3)',
-            ),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(46),
+          sliver: SliverToBoxAdapter(
+            child: FilledButton.icon(
+              onPressed: (state.canAddCustomTheme && canNavigate)
+                  ? onAdd
+                  : null,
+              icon: const Icon(Icons.add),
+              label: Text(
+                state.canAddCustomTheme
+                    ? 'Add Custom Theme'
+                    : 'Custom theme limit reached (3/3)',
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+              ),
             ),
           ),
         ),
-        Expanded(
-          child: state.customThemes.isEmpty
-              ? _EmptyCustomThemes(onAdd: canNavigate ? onAdd : () {})
-              : ListView.builder(
-                  padding: EdgeInsets.fromLTRB(
-                    0,
-                    8,
-                    0,
-                    24 + MediaQuery.of(context).padding.bottom,
-                  ),
-                  itemCount: state.customThemes.length,
-                  itemBuilder: (context, index) {
-                    final theme = state.customThemes[index];
-                    return CustomThemeTile(
-                      theme: theme,
-                      isActive: theme.id == state.activeThemeId,
-                      isEnabled: !state.isActionInProgress,
-                      onApply: () => context.read<ThemeListBloc>().add(
-                        ThemeListThemeApplied(theme.id),
-                      ),
-                      onEdit: canNavigate ? () => onEdit(theme) : () {},
-                      onDelete: () => onDelete(theme),
-                    );
-                  },
-                ),
-        ),
+        if (state.customThemes.isEmpty)
+          SliverFillRemaining(
+            // hasScrollBody: false lets this size to the empty-state
+            // content and center it when it fits, but still allows the
+            // CustomScrollView to scroll to it if it doesn't.
+            hasScrollBody: false,
+            child: _EmptyCustomThemes(onAdd: canNavigate ? onAdd : () {}),
+          )
+        else
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              0,
+              8,
+              0,
+              24 + MediaQuery.of(context).padding.bottom,
+            ),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final theme = state.customThemes[index];
+                  return CustomThemeTile(
+                    theme: theme,
+                    isActive: theme.id == state.activeThemeId,
+                    isEnabled: !state.isActionInProgress,
+                    onApply: () => context.read<ThemeListBloc>().add(
+                      ThemeListThemeApplied(theme.id),
+                    ),
+                    onEdit: canNavigate ? () => onEdit(theme) : () {},
+                    onDelete: () => onDelete(theme),
+                  );
+                },
+                childCount: state.customThemes.length,
+              ),
+            ),
+          ),
       ],
     );
   }

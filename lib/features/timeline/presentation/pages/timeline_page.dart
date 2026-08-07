@@ -628,6 +628,7 @@ class _CalendarLegend extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Row(
+        spacing: 12,
         children: [
           LegendItem(
             label: 'Has entry',
@@ -649,7 +650,7 @@ class _CalendarLegend extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 16),
+          
           LegendItem(
             label: 'Favorite',
             child: Container(
@@ -670,7 +671,7 @@ class _CalendarLegend extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 16),
+          
           LegendItem(
             label: 'Selected',
             child: Container(
