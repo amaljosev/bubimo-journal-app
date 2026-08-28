@@ -122,12 +122,31 @@ class _MainShellState extends State<MainShell> {
     if (_isNavigatingToCreate) return;
     _isNavigatingToCreate = true;
 
+    // Capture which tab was active *before* pushing the form. The FAB
+    // is reachable from every tab, so once the form pops back we need
+    // to know whether we were sitting on Profile/Analytics — in that
+    // case a plain pop would just reveal that screen again instead of
+    // showing the entry the user just saved.
+    final openedFromIndex = _currentIndex;
+
     final result = await context.push<bool>(AppRoutes.diaryForm);
 
     _isNavigatingToCreate = false;
 
     if (result == true && context.mounted) {
-      _diaryListBloc.add(const LoadDiaryEntries());
+      if (openedFromIndex != _homeIndex) {
+        // The FAB is reachable from every tab. Route to the Diary tab
+        // instead of letting the pop reveal whichever tab (Timeline,
+        // Themes, Profile/Analytics) the entry was created from.
+        // `_onTabTapped` both flips the selected pill in `PillNavBar`
+        // and (since it's switching *into* index 1) already dispatches
+        // `LoadDiaryEntries`, so there's no separate reload needed in
+        // this branch.
+        _onTabTapped(_homeIndex);
+      } else {
+        // Already on the Diary tab — just refresh it in place.
+        _diaryListBloc.add(const LoadDiaryEntries());
+      }
     }
   }
 

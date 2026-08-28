@@ -12,8 +12,9 @@ import 'activity_day_utils.dart';
 /// second `getAllDiaryEntries()` fetch.
 ///
 /// Computes the longest streak ever achieved: the longest run of
-/// consecutive calendar days with at least one entry created OR
-/// updated, anywhere in the user's history (not just ending today).
+/// consecutive calendar days with at least one entry DATED that day
+/// (see [buildActivityDaySet]), anywhere in the user's history (not
+/// just ending today).
 int calculateLongestStreak(Set<DateTime> activityDays) {
   if (activityDays.isEmpty) return 0;
 

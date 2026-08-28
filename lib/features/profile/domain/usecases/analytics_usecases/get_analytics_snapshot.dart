@@ -78,10 +78,10 @@ class GetAnalyticsSnapshot {
         moodCounts: calculateMoodCounts(entries),
         currentStreak: calculateCurrentStreak(activityDays),
         longestStreak: calculateLongestStreak(activityDays),
-        // Heatmap uses entries directly (keyed by DiaryEntry.date), NOT
-        // activityDays (createdAt/updatedAt) — see calculateHeatmapData's
-        // doc comment for why the heatmap and streaks deliberately use
-        // different definitions of "when did this happen".
+        // Heatmap and both streaks now share the same underlying
+        // definition — see buildActivityDaySet's and
+        // calculateHeatmapData's doc comments — both keyed off
+        // DiaryEntry.date, not createdAt/updatedAt.
         heatmapData: calculateHeatmapData(entries),
         entryStats: calculateEntryStats(entries),
         wordCountTrend: calculateWordCountTrend(entries),

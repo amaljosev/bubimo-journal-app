@@ -37,18 +37,17 @@ class HeatmapDay extends Equatable {
 ///
 /// IMPORTANT — this is keyed by [DiaryEntry.date] (the diary date the
 /// user picked/backdated to), NOT by `createdAt`/`updatedAt`. This is a
-/// deliberate change from the heatmap's original design: it now shares
-/// the exact same source of truth as the Timeline screen, so entry
-/// counts are consistent between the two, and backdating or editing an
-/// entry for a previous date correctly updates that earlier day's cell
-/// — not today's.
+/// deliberate design choice: it shares the exact same source of truth
+/// as the Timeline screen, so entry counts are consistent between the
+/// two, and backdating or editing an entry for a previous date
+/// correctly updates that earlier day's cell — not today's.
 ///
-/// This intentionally diverges from `calculateCurrentStreak` /
-/// `calculateLongestStreak`, which still use `createdAt`/`updatedAt`
-/// ("did you actually show up and write today") on purpose — backdating
-/// an entry to patch a gap should not silently repair a broken streak.
-/// The heatmap and the streaks are allowed to disagree with each other
-/// for this reason; only the heatmap and Timeline need to agree.
+/// The current/longest streak calculations (`calculateCurrentStreak`/
+/// `calculateLongestStreak`, via [buildActivityDaySet]) now use this
+/// same `DiaryEntry.date`-based definition — so the heatmap and streaks
+/// deliberately agree with each other, matching how journaling apps
+/// like Day One and Rosebud let a backdated entry both fill in the
+/// heatmap cell for that day AND repair a broken streak through it.
 List<HeatmapDay> calculateHeatmapData(List<DiaryEntry> entries) {
   final countsByDay = <DateTime, int>{};
   for (final entry in entries) {

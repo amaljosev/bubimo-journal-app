@@ -12,21 +12,37 @@ import 'activity_day_utils.dart';
 /// second `getAllDiaryEntries()` fetch.
 ///
 /// Computes the current streak: the number of consecutive calendar days
-/// (ending today) with at least one entry created OR updated.
+/// with at least one entry DATED that day (see [buildActivityDaySet]),
+/// ending today if today already has an entry, or ending yesterday if
+/// today doesn't have one YET (today isn't over — that's not a missed
+/// day).
 ///
-/// Per the locked streak definition, editing an old entry counts toward
-/// TODAY's streak — so "activity days" are built from both `createdAt`
-/// and `updatedAt` timestamps, not just entry creation.
+/// Since activity days come from [DiaryEntry.date] rather than
+/// `createdAt`/`updatedAt`, writing or backdating an entry for a
+/// previously-missed day fills that day back in — if it reconnects the
+/// run up to today/yesterday, the streak is naturally repaired with no
+/// special-case logic here.
 int calculateCurrentStreak(Set<DateTime> activityDays) {
   if (activityDays.isEmpty) return 0;
 
+  final today = AppDateUtils.dateOnly(DateTime.now());
+  var cursor = today;
+
+  if (!activityDays.contains(cursor)) {
+    // No activity yet today. On its own this does NOT mean the streak
+    // is broken — today simply hasn't ended, and the user may still
+    // write later today. The streak is only actually broken once a
+    // full calendar day has passed with zero activity, i.e. yesterday
+    // is ALSO empty. If yesterday has activity, the streak is still
+    // alive as of right now; count it starting from yesterday instead
+    // (today just doesn't add to the count until the user does
+    // something today).
+    final yesterday = cursor.subtract(const Duration(days: 1));
+    if (!activityDays.contains(yesterday)) return 0;
+    cursor = yesterday;
+  }
+
   var streak = 0;
-  var cursor = AppDateUtils.dateOnly(DateTime.now());
-
-  // Today must have activity for a streak to be "alive"; otherwise
-  // it's broken (0), even if yesterday had activity.
-  if (!activityDays.contains(cursor)) return 0;
-
   while (activityDays.contains(cursor)) {
     streak++;
     cursor = cursor.subtract(const Duration(days: 1));

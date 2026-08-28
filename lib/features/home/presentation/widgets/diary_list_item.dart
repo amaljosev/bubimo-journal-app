@@ -143,7 +143,7 @@ class DiaryListItem extends StatelessWidget {
     final title = entry.title?.isNotEmpty == true ? entry.title! : '(Untitled)';
     final rawPreview = entry.preview?.isNotEmpty == true
         ? entry.preview!
-        : (entry.content ?? '');
+        : '';
     final sanitizedPreview = _sanitizePreview(rawPreview);
 
     // Surface color, straight from the theme — matches what the user
