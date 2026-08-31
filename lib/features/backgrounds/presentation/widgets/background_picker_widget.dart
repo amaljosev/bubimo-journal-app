@@ -314,10 +314,10 @@ class _BackgroundGrid extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           sliver: SliverGrid(
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
+              crossAxisCount: 4,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
-              childAspectRatio: 1,
+              childAspectRatio: 0.8,
             ),
             delegate: SliverChildBuilderDelegate(
               (context, index) {
@@ -326,7 +326,7 @@ class _BackgroundGrid extends StatelessWidget {
                     isSelected: selectedPath == null,
                     onTap: () => onSelect(null),
                     child: const _ClearTile(),
-                  );
+                  ); 
                 }
                 final path = paths[index - 1];
                 return _SelectableTile(

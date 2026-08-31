@@ -12,7 +12,7 @@ import '../../../../core/di/injection.dart';
 /// PDF — see `app_drawer.dart`'s `onExportTap` wiring. Deliberately one
 /// screen for all three rather than separate ones (see [BackupBloc]'s
 /// doc comment) — the drawer's separate "Backup" item is reserved for
-/// a future cloud-sync feature and intentionally left unwired by this
+/// a future cloud-sync feature and intentionally left un wired by this
 /// feature.
 class BackupRestorePage extends StatelessWidget {
   const BackupRestorePage({super.key});
@@ -376,10 +376,12 @@ class _SectionCard extends StatelessWidget {
                 child: Icon(icon, color: colorScheme.primary),
               ),
               const SizedBox(width: 12),
-              Text(
-                title,
-                style: textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+              Flexible(
+                child: Text(
+                  title,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],

@@ -86,6 +86,16 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   // Quill editor and can be taller than this viewport for a long entry.
   final GlobalKey _editorBoundsKey = GlobalKey();
 
+  // Marks `OverlayLayer`'s own render box — i.e. the origin of its local
+  // (document) coordinate space. Since the metadata header now shares the
+  // same scroll view and sits *above* `OverlayLayer`, that origin is no
+  // longer simply "the top of the scrollable content" (it's offset by the
+  // header's height too), so `_visibleBoundsForPlacement` uses this key
+  // together with `_editorBoundsKey` to translate the viewport's rect into
+  // `OverlayLayer`'s local space via the actual render-tree transform,
+  // rather than assuming a fixed offset.
+  final GlobalKey _overlayLayerKey = GlobalKey();
+
   // Tracks the description area's scroll position so newly added
   // overlay items/stickers can be placed relative to the currently
   // *visible* region of a long entry, not just the top of the document.
@@ -122,47 +132,60 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   // sufficient.
   final GlobalKey _quillEditorKey = GlobalKey();
 
-  // Built once rather than as a fresh object literal inside `build` —
+  // Built once rather than as a fresh list literal inside `build` —
   // `embedBuilders` used to be reconstructed (`ResizableImageEmbedBuilder()`
   // plus a new list) on every keystroke, which is wasteful even though
   // it wasn't the root cause of the unmounted-context crash (see
   // `_onQuillContentChanged`). Hoisting it removes one more source of
-  // unnecessary rebuilding of the editor's config on every rebuild.
-  late final quill.QuillEditorConfig _quillEditorConfig =
-      quill.QuillEditorConfig(
-        placeholder: "What's on your mind?",
-        padding: EdgeInsets.zero,
-        scrollable: false,
-        embedBuilders: [
-          ResizableImageEmbedBuilder(),
-          DividerEmbedBuilder(),
-          ...FlutterQuillEmbeds.editorBuilders(),
-        ],
-        // flutter_quill's own handling of the 'font' attribute applies
-        // the raw family string directly as `TextStyle(fontFamily:
-        // value)`. That's correct for a genuinely bundled asset (like
-        // SafeFontService.bundledDefaultFamily), but google_fonts
-        // never registers a dynamically-loaded font under its plain
-        // display name — it registers it under an internal
-        // variant-encoded name and only offers the plain name as a
-        // *fallback* (see GoogleFonts.getFont's return value). So the
-        // raw attribute value the editor renders with was never
-        // actually resolvable, no matter how long it had to download.
-        // Overriding just the 'font' key here routes it through the
-        // same SafeFontService translation the title field already
-        // uses; every other attribute returns an empty style so it
-        // doesn't disturb flutter_quill's own (already-correct)
-        // handling of bold/italic/size/color/etc.
-        customStyleBuilder: (attribute) {
-          if (attribute.key == 'font' && attribute.value != null) {
-            return getIt<SafeFontService>().resolveTextStyle(
-              fontFamily: attribute.value.toString(),
-              base: const TextStyle(),
-            );
-          }
-          return const TextStyle();
-        },
+  // unnecessary rebuilding on every rebuild.
+  late final List<quill.EmbedBuilder> _quillEmbedBuilders = [
+    ResizableImageEmbedBuilder(),
+    DividerEmbedBuilder(),
+    ...FlutterQuillEmbeds.editorBuilders(),
+  ];
+
+  // flutter_quill's own handling of the 'font' attribute applies the raw
+  // family string directly as `TextStyle(fontFamily: value)`. That's
+  // correct for a genuinely bundled asset (like
+  // SafeFontService.bundledDefaultFamily), but google_fonts never
+  // registers a dynamically-loaded font under its plain display name — it
+  // registers it under an internal variant-encoded name and only offers
+  // the plain name as a *fallback* (see GoogleFonts.getFont's return
+  // value). So the raw attribute value the editor renders with was never
+  // actually resolvable, no matter how long it had to download.
+  // Overriding just the 'font' key here routes it through the same
+  // SafeFontService translation the title field already uses; every other
+  // attribute returns an empty style so it doesn't disturb flutter_quill's
+  // own (already-correct) handling of bold/italic/size/color/etc. Hoisted
+  // as a tear-off for the same reason as `_quillEmbedBuilders` above.
+  TextStyle _quillCustomStyleBuilder(quill.Attribute attribute) {
+    if (attribute.key == 'font' && attribute.value != null) {
+      return getIt<SafeFontService>().resolveTextStyle(
+        fontFamily: attribute.value.toString(),
+        base: const TextStyle(),
       );
+    }
+    return const TextStyle();
+  }
+
+  // A getter rather than the `late final` field this used to be: the two
+  // expensive-to-rebuild pieces (`embedBuilders`, `customStyleBuilder`) stay
+  // hoisted above and are only *referenced* here, so this stays cheap to
+  // call on every build. It needs to vary with `_panelHeight` (the extra
+  // space to hold clear while a T/Font/color/list panel is open, on top of
+  // the toolbar's own fixed footprint) via `scrollBottomInset`, which is
+  // what tells Quill's own caret-visibility logic how much of the bottom
+  // of the shared scroll view is currently obscured — see
+  // `_descriptionScrollController` and its use in the `QuillEditor.basic`
+  // call below for the other half of this fix.
+  quill.QuillEditorConfig get _quillEditorConfig => quill.QuillEditorConfig(
+    placeholder: "What's on your mind?",
+    padding: EdgeInsets.zero,
+    scrollable: false,
+    scrollBottomInset: DiaryBottomToolbarState.totalHeight + _panelHeight,
+    embedBuilders: _quillEmbedBuilders,
+    customStyleBuilder: _quillCustomStyleBuilder,
+  );
 
   // Captured once so listeners registered outside `build` (Quill
   // content changes) can dispatch bloc events without needing a
@@ -386,21 +409,28 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   /// image lands where the user is actually looking rather than always
   /// at the top of a long entry.
   ///
-  /// The overlay Stack now scrolls together with the Quill editor
-  /// (both are children of the same `SingleChildScrollView`), so its
-  /// coordinate space is the *whole document's* space, not just the
-  /// viewport's — offsetting by the current scroll position translates
-  /// "top-left of the visible viewport" into that shared space. Falls
-  /// back to a `0,0`-origin rect of the viewport's own size if the
-  /// bounds box isn't laid out yet (e.g. very first frame).
+  /// The overlay Stack scrolls together with the Quill editor (both are
+  /// children of the same `SingleChildScrollView`, alongside the metadata
+  /// header above them) — but that header means `OverlayLayer`'s own
+  /// local origin no longer coincides with the scroll view's content
+  /// origin the way it would if `OverlayLayer` were the sole scrollable
+  /// child. Rather than track the header's height (or the scroll offset)
+  /// by hand, this reads both boxes' actual positions off the render tree
+  /// and lets `RenderBox.localToGlobal`/`globalToLocal` do the
+  /// translation — that's correct regardless of scroll position, header
+  /// height, or anything else that changes the layout between them.
+  /// Falls back to `null` if either box isn't laid out yet (e.g. very
+  /// first frame), same as before.
   Rect? _visibleBoundsForPlacement() {
-    final box =
+    final viewportBox =
         _editorBoundsKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null) return null;
-    final scrollOffset = _descriptionScrollController.hasClients
-        ? _descriptionScrollController.offset
-        : 0.0;
-    return Rect.fromLTWH(0, scrollOffset, box.size.width, box.size.height);
+    final contentBox =
+        _overlayLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (viewportBox == null || contentBox == null) return null;
+    final viewportOriginInContentSpace = contentBox.globalToLocal(
+      viewportBox.localToGlobal(Offset.zero),
+    );
+    return viewportOriginInContentSpace & viewportBox.size;
   }
 
   /// Opens the sticker picker sheet. Unlike gallery overlay photos
@@ -1066,50 +1096,15 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                 SafeArea(
                   child: Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                        child: Column(
-                          children: [
-                            Listener(
-                              behavior: HitTestBehavior.translucent,
-                              onPointerDown: (_) => _toolbarKey.currentState
-                                  ?.closeActivePanelAndRestoreFocus(),
-                              child: DiaryFormHeaderRow(
-                                date: state.date,
-                                mood: state.mood,
-                                moodAvatarKey: _moodAvatarKey,
-                                onDateTap: () => _pickDate(context, state.date),
-                                onMoodTap: () =>
-                                    _openMoodPopover(context, state.mood),
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Listener(
-                              behavior: HitTestBehavior.translucent,
-                              onPointerDown: (_) =>
-                                  _toolbarKey.currentState?.closeActivePanel(),
-                              child: DiaryFormTitleField(
-                                controller: _titleController,
-                                focusNode: _titleFocusNode,
-                                nextFocusNode: _descriptionFocusNode,
-                                textAlign: _textAlignFor(state.alignment),
-                                isBold: state.isBold,
-                                isItalic: state.isItalic,
-                                isUnderlined: state.isUnderline,
-                                fontSize: state.fontSize != null
-                                    ? double.tryParse(state.fontSize!)
-                                    : null,
-                                textColor: _colorFromHex(state.textColorHex),
-                                fontFamily: state.fontFamily,
-                                onChanged: (value) => context
-                                    .read<DiaryFormBloc>()
-                                    .add(DiaryFormTitleChanged(value)),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-                        ),
-                      ),
+                      // The header (date/mood/title) used to be a fixed
+                      // sibling here, permanently reserving its height
+                      // even while deep in a long entry. It's now the
+                      // first child *inside* the same scroll view as the
+                      // editor below, so it scrolls away with the rest of
+                      // the content instead of permanently eating into
+                      // the space available for editing — this is what
+                      // makes the metadata section "scroll when
+                      // necessary" instead of always being pinned.
                       Expanded(
                         child: LayoutBuilder(
                           builder: (context, constraints) {
@@ -1131,36 +1126,133 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                                   controller: _descriptionScrollController,
                                   physics: const BouncingScrollPhysics(),
                                   padding: EdgeInsets.only(
-                                    // Extra bottom padding while a panel
-                                    // is open, so the last line of the
-                                    // entry isn't hidden behind it.
-                                    bottom: _panelHeight + 16,
+                                    // Reserves space for the toolbar's own
+                                    // fixed footprint (previously missing
+                                    // — the last line of a long entry
+                                    // could sit behind it even with no
+                                    // panel open) plus extra while a
+                                    // T/Font/color/list panel is open.
+                                    bottom:
+                                        DiaryBottomToolbarState.totalHeight +
+                                        _panelHeight +
+                                        16,
                                   ),
-                                  child: OverlayLayer(
-                                    boundsKey: _editorBoundsKey,
-                                    images: state.overlayImages,
-                                    stickers: state.stickers,
-                                    selectedImageId:
-                                        state.selectedOverlayImageId,
-                                    selectedStickerId: state.selectedStickerId,
-                                    onSelectImage: _onOverlayImageSelect,
-                                    onSelectSticker: _onStickerSelect,
-                                    onDeselect: _onOverlayImageDeselect,
-                                    onImageTransform: _onOverlayImageTransform,
-                                    onStickerTransform: _onStickerTransform,
-                                    onRemoveImage: _onOverlayImageRemove,
-                                    onRemoveSticker: _onStickerRemove,
-                                    child: ConstrainedBox(
-                                      constraints: BoxConstraints(
-                                        minHeight: constraints.maxHeight,
+                                  child: Column(
+                                    // Required: a Column inside a
+                                    // vertically-scrolling
+                                    // SingleChildScrollView gets unbounded
+                                    // height, and Column's default
+                                    // MainAxisSize.max would throw
+                                    // ("unbounded height") without this —
+                                    // each child sizes to its own natural
+                                    // height instead.
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Listener(
+                                        behavior:
+                                            HitTestBehavior.translucent,
+                                        onPointerDown: (_) => _toolbarKey
+                                            .currentState
+                                            ?.closeActivePanelAndRestoreFocus(),
+                                        child: DiaryFormHeaderRow(
+                                          date: state.date,
+                                          mood: state.mood,
+                                          moodAvatarKey: _moodAvatarKey,
+                                          onDateTap: () =>
+                                              _pickDate(context, state.date),
+                                          onMoodTap: () => _openMoodPopover(
+                                            context,
+                                            state.mood,
+                                          ),
+                                        ),
                                       ),
-                                      child: quill.QuillEditor.basic(
-                                        key: _quillEditorKey,
-                                        controller: _quillController!,
-                                        focusNode: _descriptionFocusNode,
-                                        config: _quillEditorConfig,
+                                      const SizedBox(height: 20),
+                                      Listener(
+                                        behavior:
+                                            HitTestBehavior.translucent,
+                                        onPointerDown: (_) => _toolbarKey
+                                            .currentState
+                                            ?.closeActivePanel(),
+                                        child: DiaryFormTitleField(
+                                          controller: _titleController,
+                                          focusNode: _titleFocusNode,
+                                          nextFocusNode:
+                                              _descriptionFocusNode,
+                                          textAlign: _textAlignFor(
+                                            state.alignment,
+                                          ),
+                                          isBold: state.isBold,
+                                          isItalic: state.isItalic,
+                                          isUnderlined: state.isUnderline,
+                                          fontSize: state.fontSize != null
+                                              ? double.tryParse(
+                                                  state.fontSize!,
+                                                )
+                                              : null,
+                                          textColor: _colorFromHex(
+                                            state.textColorHex,
+                                          ),
+                                          fontFamily: state.fontFamily,
+                                          onChanged: (value) => context
+                                              .read<DiaryFormBloc>()
+                                              .add(
+                                                DiaryFormTitleChanged(value),
+                                              ),
+                                        ),
                                       ),
-                                    ),
+                                      const SizedBox(height: 12),
+                                      OverlayLayer(
+                                        key: _overlayLayerKey,
+                                        boundsKey: _editorBoundsKey,
+                                        images: state.overlayImages,
+                                        stickers: state.stickers,
+                                        selectedImageId:
+                                            state.selectedOverlayImageId,
+                                        selectedStickerId:
+                                            state.selectedStickerId,
+                                        onSelectImage: _onOverlayImageSelect,
+                                        onSelectSticker: _onStickerSelect,
+                                        onDeselect: _onOverlayImageDeselect,
+                                        onImageTransform:
+                                            _onOverlayImageTransform,
+                                        onStickerTransform:
+                                            _onStickerTransform,
+                                        onRemoveImage: _onOverlayImageRemove,
+                                        onRemoveSticker: _onStickerRemove,
+                                        child: ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            minHeight: constraints.maxHeight,
+                                          ),
+                                          child: quill.QuillEditor.basic(
+                                            key: _quillEditorKey,
+                                            controller: _quillController!,
+                                            focusNode: _descriptionFocusNode,
+                                            // The actual fix for caret
+                                            // visibility: this connects
+                                            // Quill's own built-in
+                                            // caret-tracking logic to the
+                                            // scrollable that's really on
+                                            // screen. Previously this
+                                            // parameter was omitted, so
+                                            // QuillEditor (with
+                                            // `scrollable: false` in
+                                            // `_quillEditorConfig`)
+                                            // created its own orphaned
+                                            // internal ScrollController
+                                            // that nothing on screen was
+                                            // ever attached to — its
+                                            // caret-visibility math was
+                                            // adjusting a scroll position
+                                            // nobody could see.
+                                            scrollController:
+                                                _descriptionScrollController,
+                                            config: _quillEditorConfig,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),

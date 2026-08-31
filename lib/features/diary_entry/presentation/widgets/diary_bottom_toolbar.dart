@@ -144,6 +144,16 @@ enum _ActivePanel { none, textFormat, list, font, textColor, selectionColor }
 class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   static const double _barHeight = 60;
 
+  /// This toolbar's total vertical footprint — the fixed `10`-logical-pixel
+  /// top/bottom padding plus the bar itself — *excluding* the device's own
+  /// bottom safe-area inset, since that's consumed by this widget's own
+  /// [SafeArea] and isn't something the host page needs to additionally
+  /// account for. Exposed so [DiaryFormPage]'s description scroll view can
+  /// reserve exactly this much space (via `scrollBottomInset`/scroll
+  /// padding) so the last line of a long entry is never hidden behind this
+  /// always-visible bar.
+  static const double totalHeight = _barHeight + 20;
+
   _ActivePanel _activePanel = _ActivePanel.none;
 
   // Only selection changes (collapsed <-> expanded) need to rebuild
