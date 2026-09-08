@@ -1,5 +1,6 @@
 // lib/core/di/injection.dart
 
+import 'package:bubimo/core/ads/ads_preference_service.dart';
 import 'package:bubimo/features/backgrounds/data/datasources/background_preset_cache_data_source.dart';
 import 'package:bubimo/features/backup/presentation/bloc/backup_bloc.dart';
 import 'package:bubimo/features/contact_us/data/repositories/contact_repository_impl.dart';
@@ -588,5 +589,13 @@ getIt.registerFactory<BackgroundPickerBloc>(
   );
   getIt.registerLazySingleton(
     () => StartFlexibleUpdate(getIt<AppUpdateRepository>()),
+  );
+    // --- ads ---
+  // Cross-cutting like NetworkInfo just above — every BannerAdWidget
+  // instance and the Settings toggle both read/write the same
+  // singleton's ValueNotifier, regardless of which tab/screen they're
+  // on.
+  getIt.registerLazySingleton<AdsPreferenceService>(
+    () => AdsPreferenceService(),
   );
 }

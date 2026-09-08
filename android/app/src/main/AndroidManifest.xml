@@ -10,6 +10,9 @@
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:usesCleartextTraffic="true">
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-8710729560980389~3028405392"/>
         <activity
         android:name="com.yalantis.ucrop.UCropActivity"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
@@ -74,6 +77,13 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Added for AdMob: lets banner/interstitial ads resolve an
+             external browser for click-through on Android 11+, where
+             package visibility is restricted by default. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 </manifest>
