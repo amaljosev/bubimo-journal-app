@@ -1,7 +1,7 @@
 // lib/main.dart
 
 import 'dart:async';
-import 'package:bubimo/core/ads/ads_preference_service.dart';
+import 'package:bubimo/features/ads/data/services/ads_preference_service.dart';
 import 'package:bubimo/core/config/secrets.dart';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:flutter/foundation.dart';

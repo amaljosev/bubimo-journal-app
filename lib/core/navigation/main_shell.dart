@@ -1,6 +1,5 @@
 // lib/core/navigation/main_shell.dart
 
-
 import 'package:bubimo/core/navigation/notched_nav_bar.dart';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/features/profile/presentation/pages/profile_page.dart';
@@ -16,7 +15,6 @@ import '../../features/profile/presentation/cubit/profile_cubit.dart';
 import '../../features/theme/presentation/bloc/theme_list/theme_list_bloc.dart';
 import '../../features/theme/presentation/pages/theme_screen.dart';
 import '../../features/timeline/presentation/pages/timeline_page.dart';
-import '../ads/banner_ad_widget.dart';
 import '../di/injection.dart';
 
 /// App-wide navigation shell. Owns the bottom navigation bar and an
@@ -41,14 +39,6 @@ import '../di/injection.dart';
 /// system back while on any other tab returns to Diary instead of
 /// exiting the app or popping the shell route; pressing back while
 /// already on Diary allows the normal pop (app exit / previous route).
-///
-/// A [BannerAdWidget] sits at the bottom of [body], below the tab
-/// content and above a fixed [SizedBox] reserving exactly the height
-/// [PillNavBar] floats within (see [_pillNavBarTotalHeight]). This
-/// keeps the banner fully visible on all four tabs while guaranteeing
-/// it's never covered by the floating nav bar/FAB — `extendBody: true`
-/// still lets the nav bar float over that reserved space visually, it
-/// just no longer floats over the ad itself.
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -71,12 +61,6 @@ class _MainShellState extends State<MainShell> {
   // Guards against rapid repeated taps on the nav bar's FAB opening
   // multiple stacked Create screens.
   bool _isNavigatingToCreate = false;
-
-  // Mirrors PillNavBar's own totalHeight calculation (see
-  // notched_nav_bar.dart's `build` method) so the banner ad slot below
-  // reserves exactly the vertical space the floating pill nav occupies
-  // — no more, no less — without needing PillNavBar itself to expose
-  // this as a public constant/getter.
 
   static const List<NavBarItem> _leftTabs = [
     NavBarItem(
@@ -186,69 +170,48 @@ class _MainShellState extends State<MainShell> {
       canPop: _currentIndex == _homeIndex,
       onPopInvokedWithResult: _handlePopInvoked,
       child: Scaffold(
-        body: Column(
+        body: IndexedStack(
+          index: _currentIndex,
           children: [
-            Expanded(
-              child: IndexedStack(
-                index: _currentIndex,
-                children: [
-                  BlocProvider.value(
-                    value: _diaryListBloc,
-                    child: const TimelinePage(),
-                  ),
-                  BlocProvider.value(
-                    value: _diaryListBloc,
-                    // Home only previews the most recent entries (see
-                    // HomePage's doc comment / `_maxHomeEntries`); its
-                    // "View more" row hands off to the Timeline tab —
-                    // the same tab this IndexedStack already keeps
-                    // mounted at `_timelineIndex`, fed by this same
-                    // `_diaryListBloc` — rather than pushing a new
-                    // route that would just show a second,
-                    // disconnected copy of the same data.
-                    child: HomePage(
-                      onViewMoreInTimeline: () => _onTabTapped(_timelineIndex),
-                    ),
-                  ),
-                  BlocProvider.value(
-                    value: _themeListBloc,
-                    child: const ThemeScreen(),
-                  ),
-                  MultiBlocProvider(
-                    providers: [
-                      BlocProvider.value(value: _profileCubit),
-                      BlocProvider.value(value: _analyticsBloc),
-                    ],
-                    child: const ProfileAnalyticsScreen(),
-                  ),
-                ],
+            BlocProvider.value(
+              value: _diaryListBloc,
+              child: const TimelinePage(),
+            ),
+            BlocProvider.value(
+              value: _diaryListBloc,
+              // Home only previews the most recent entries (see
+              // HomePage's doc comment / `_maxHomeEntries`); its
+              // "View more" row hands off to the Timeline tab —
+              // the same tab this IndexedStack already keeps
+              // mounted at `_timelineIndex`, fed by this same
+              // `_diaryListBloc` — rather than pushing a new
+              // route that would just show a second,
+              // disconnected copy of the same data.
+              child: HomePage(
+                onViewMoreInTimeline: () => _onTabTapped(_timelineIndex),
               ),
             ),
-            // Banner sits right above the floating pill nav's reserved
-            // zone (see _pillNavBarTotalHeight below) — visible on all
-            // 4 tabs, never covered by the nav bar. Collapses to
-            // nothing via SizedBox.shrink() internally when
-            // disabled/unloaded, so no extra visibility check is
-            // needed here.
-            // const BannerAdWidget(),
-            // SizedBox(height: _pillNavBarTotalHeight),
+            BlocProvider.value(
+              value: _themeListBloc,
+              child: const ThemeScreen(),
+            ),
+            MultiBlocProvider(
+              providers: [
+                BlocProvider.value(value: _profileCubit),
+                BlocProvider.value(value: _analyticsBloc),
+              ],
+              child: const ProfileAnalyticsScreen(),
+            ),
           ],
         ),
         extendBody: true,
-        bottomNavigationBar: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: .end,
-          children: [
-            PillNavBar(
-              leftItems: _leftTabs,
-              rightItems: _rightTabs,
-              currentIndex: _currentIndex,
-              onTap: _onTabTapped,
-              onFabTap: () => _openCreateEntry(context),
-              fabIcon: Icons.add, // keep the "+" icon
-            ),
-            const BannerAdWidget(),
-          ],
+        bottomNavigationBar: PillNavBar(
+          leftItems: _leftTabs,
+          rightItems: _rightTabs,
+          currentIndex: _currentIndex,
+          onTap: _onTabTapped,
+          onFabTap: () => _openCreateEntry(context),
+          fabIcon: Icons.add, // keep the "+" icon
         ),
       ),
     );

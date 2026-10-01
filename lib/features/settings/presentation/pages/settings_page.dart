@@ -1,6 +1,6 @@
 // lib/features/settings/presentation/pages/settings_page.dart
 
-import 'package:bubimo/core/ads/ads_toggle_tile.dart';
+import 'package:bubimo/features/ads/presentation/widgets/ads_toggle_tile.dart';
 import 'package:bubimo/core/constants/app_constants.dart';
 import 'package:bubimo/core/network/internet_gate.dart';
 import 'package:bubimo/core/router/app_router.dart';

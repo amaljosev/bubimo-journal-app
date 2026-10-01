@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 
-import '../di/injection.dart';
-import 'ads_preference_service.dart';
+import '../../../../core/di/injection.dart';
+import '../../data/services/ads_preference_service.dart';
 
 /// A Settings row with a toggle switch for turning banner ads on/off.
 ///

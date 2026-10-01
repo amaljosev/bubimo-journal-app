@@ -2,6 +2,8 @@
 
 import 'dart:async';
 
+import 'package:bubimo/features/ads/presentation/pages/daily_ad_notice_page.dart';
+import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
 import 'package:bubimo/core/utils/background_image_utils.dart';
 import 'package:bubimo/core/utils/overlay_tint_utils.dart';
 import 'package:bubimo/core/utils/quill_document_utils.dart';
@@ -120,6 +122,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   quill.QuillController? _quillController;
   bool _controllersSynced = false;
 
+  // Guards the post-save flow (ad, then pop) so it runs only once even
+  // if the success state were delivered to the listener again.
+  bool _isFinishingSave = false;
+
   // Coalesces rapid keystrokes within the same frame into a single
   // deferred bloc dispatch — see `_onQuillContentChanged`.
   bool _contentChangeScheduled = false;
@@ -232,6 +238,33 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     // `canRequestFocus` gating in `_onPanelRequested`/`_closePanel`.
     _descriptionFocusNode.addListener(_onDescriptionFocusChanged);
     _titleFocusNode.addListener(_onTitleFocusChanged);
+    // Start loading the full-screen ad now so it's ready by the time
+    // the user taps Save. No-ops if ads are off or one was already
+    // shown today.
+    unawaited(getIt<InterstitialAdService>().preload());
+  }
+
+  /// Runs after the entry has been saved: shows the full-screen ad if
+  /// one is due (max once per day), then returns to the previous
+  /// screen with `true` so it refreshes. An ad problem never blocks
+  /// this — [InterstitialAdService.showIfEligible] never throws.
+  Future<void> _finishSave() async {
+    if (_isFinishingSave) return;
+    _isFinishingSave = true;
+    final ads = getIt<InterstitialAdService>();
+
+    if (await ads.shouldShowNotice()) {
+      // First save ever: instead of an ad, show the one-time full-screen
+      // notice. No auto-skip — the user leaves with "Go home". Real ads
+      // start from the next calendar day.
+      if (!mounted) return;
+      await DailyAdNoticePage.show(context);
+      await ads.markNoticeSeen();
+    } else {
+      await ads.showIfEligible();
+    }
+    if (!mounted) return;
+    context.pop(true);
   }
 
   @override
@@ -979,7 +1012,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     return BlocConsumer<DiaryFormBloc, DiaryFormState>(
       listener: (context, state) {
         if (state.status == DiaryFormStatus.success) {
-          context.pop(true);
+          unawaited(_finishSave());
         }
         if (state.status == DiaryFormStatus.failure &&
             state.errorMessage != null) {

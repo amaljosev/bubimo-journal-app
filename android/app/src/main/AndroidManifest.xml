@@ -12,7 +12,7 @@
         android:usesCleartextTraffic="true">
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-8710729560980389~3028405392"/>
+            android:value="ca-app-pub-9255784163798688~6408731251"/>
         <activity
         android:name="com.yalantis.ucrop.UCropActivity"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar" />

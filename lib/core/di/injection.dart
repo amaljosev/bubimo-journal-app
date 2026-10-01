@@ -1,6 +1,7 @@
 // lib/core/di/injection.dart
 
-import 'package:bubimo/core/ads/ads_preference_service.dart';
+import 'package:bubimo/features/ads/data/services/ads_preference_service.dart';
+import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
 import 'package:bubimo/features/backgrounds/data/datasources/background_preset_cache_data_source.dart';
 import 'package:bubimo/features/backup/presentation/bloc/backup_bloc.dart';
 import 'package:bubimo/features/contact_us/data/repositories/contact_repository_impl.dart';
@@ -597,5 +598,12 @@ getIt.registerFactory<BackgroundPickerBloc>(
   // on.
   getIt.registerLazySingleton<AdsPreferenceService>(
     () => AdsPreferenceService(),
+  );
+
+  // Full-screen ad shown after saving a diary entry (max once per
+  // calendar day). Reads AdsPreferenceService so the "Show Ads" switch
+  // also turns this off.
+  getIt.registerLazySingleton<InterstitialAdService>(
+    () => InterstitialAdService(getIt<AdsPreferenceService>()),
   );
 }

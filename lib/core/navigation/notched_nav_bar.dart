@@ -213,108 +213,110 @@ class _PillNavBarState extends State<PillNavBar>
     final double totalHeight =
         kNavBarHeight + fabProtrusionHeight + 4.0 + kBarBottomMargin;
 
-    return SizedBox(
-      height: totalHeight,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.bottomCenter,
-        children: [
-          // ---------------- Floating rounded-rectangle bar surface ----
-          Positioned(
-            left: kBarHorizontalMargin,
-            right: kBarHorizontalMargin,
-            bottom: kBarBottomMargin,
-            height: kNavBarHeight,
-            child: Container(
-              decoration: BoxDecoration(
-                color: navBarBackground,
-                borderRadius: BorderRadius.circular(kBarCornerRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: colorScheme.shadow.withValues(alpha: 0.59),
-                    blurRadius: kBarShadowBlur,
-                    offset: const Offset(0, kBarShadowOffsetY),
-                  ),
-                ],
-              ),
-              child: Builder(
-                builder: (stackContext) {
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    alignment: Alignment.center,
-                    children: [
-                      // Sliding selection pill
-                      _SelectionPill(
-                        getTargetCenterX: () =>
-                            _selectedTabCenterX(stackContext),
-                        color: selectedPillColor,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: kNavItemsHorizontalPadding,
+    return SafeArea(
+      child: SizedBox(
+        height: totalHeight,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.bottomCenter,
+          children: [
+            // ---------------- Floating rounded-rectangle bar surface ----
+            Positioned(
+              left: kBarHorizontalMargin,
+              right: kBarHorizontalMargin,
+              bottom: kBarBottomMargin,
+              height: kNavBarHeight,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: navBarBackground,
+                  borderRadius: BorderRadius.circular(kBarCornerRadius),
+                  boxShadow: [
+                    BoxShadow(
+                      color: colorScheme.shadow.withValues(alpha: 0.59),
+                      blurRadius: kBarShadowBlur,
+                      offset: const Offset(0, kBarShadowOffsetY),
+                    ),
+                  ],
+                ),
+                child: Builder(
+                  builder: (stackContext) {
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.center,
+                      children: [
+                        // Sliding selection pill
+                        _SelectionPill(
+                          getTargetCenterX: () =>
+                              _selectedTabCenterX(stackContext),
+                          color: selectedPillColor,
                         ),
-                        child: Row(
-                          children: [
-                            for (int i = 0; i < widget.leftItems.length; i++)
-                              Expanded(
-                                key: _tabKeys[i],
-                                child: _NavItem(
-                                  item: widget.leftItems[i],
-                                  selected: widget.currentIndex == i,
-                                  onTap: () => widget.onTap(i),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: kNavItemsHorizontalPadding,
+                          ),
+                          child: Row(
+                            children: [
+                              for (int i = 0; i < widget.leftItems.length; i++)
+                                Expanded(
+                                  key: _tabKeys[i],
+                                  child: _NavItem(
+                                    item: widget.leftItems[i],
+                                    selected: widget.currentIndex == i,
+                                    onTap: () => widget.onTap(i),
+                                  ),
                                 ),
-                              ),
-                            SizedBox(width: kFabGapWidth * 0.78),
-                            for (int i = 0; i < widget.rightItems.length; i++)
-                              Expanded(
-                                key: _tabKeys[widget.leftItems.length + i],
-                                child: _NavItem(
-                                  item: widget.rightItems[i],
-                                  selected:
-                                      widget.currentIndex ==
-                                      widget.leftItems.length + i,
-                                  onTap: () =>
-                                      widget.onTap(widget.leftItems.length + i),
+                              SizedBox(width: kFabGapWidth * 0.78),
+                              for (int i = 0; i < widget.rightItems.length; i++)
+                                Expanded(
+                                  key: _tabKeys[widget.leftItems.length + i],
+                                  child: _NavItem(
+                                    item: widget.rightItems[i],
+                                    selected:
+                                        widget.currentIndex ==
+                                        widget.leftItems.length + i,
+                                    onTap: () =>
+                                        widget.onTap(widget.leftItems.length + i),
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                },
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
-          ),
-
-          // ---------------- Floating diamond FAB ----------------
-          Positioned(
-            bottom: kBarBottomMargin + kNavBarHeight - fabProtrusionHeight,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTapDown: _handleFabTapDown,
-                onTapUp: _handleFabTapUp,
-                onTapCancel: _handleFabTapCancel,
-                child: AnimatedBuilder(
-                  animation: _fabScale,
-                  builder: (context, child) =>
-                      Transform.scale(scale: _fabScale.value, child: child),
-                  child: _FloatingDiamondButton(
-                    size: kFabSize,
-                    cornerRadius: kFabCornerRadius,
-                    color: colorScheme.primary,
-                    shadowColor: colorScheme.shadow,
-                    icon: widget.fabIcon,
-                    iconColor: colorScheme.onPrimary,
-                    onTap: widget.onFabTap,
+      
+            // ---------------- Floating diamond FAB ----------------
+            Positioned(
+              bottom: kBarBottomMargin + kNavBarHeight - fabProtrusionHeight,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTapDown: _handleFabTapDown,
+                  onTapUp: _handleFabTapUp,
+                  onTapCancel: _handleFabTapCancel,
+                  child: AnimatedBuilder(
+                    animation: _fabScale,
+                    builder: (context, child) =>
+                        Transform.scale(scale: _fabScale.value, child: child),
+                    child: _FloatingDiamondButton(
+                      size: kFabSize,
+                      cornerRadius: kFabCornerRadius,
+                      color: colorScheme.primary,
+                      shadowColor: colorScheme.shadow,
+                      icon: widget.fabIcon,
+                      iconColor: colorScheme.onPrimary,
+                      onTap: widget.onFabTap,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
