@@ -14,9 +14,6 @@ enum BackupStatus {
   /// Import in progress.
   importing,
 
-  /// PDF export in progress.
-  exportingPdf,
-
   /// An export just completed successfully — see
   /// [BackupState.exportResult].
   exportSuccess,
@@ -29,10 +26,6 @@ enum BackupStatus {
   /// as a whole still succeeded.
   importSuccess,
 
-  /// A PDF export just completed successfully — see
-  /// [BackupState.pdfExportResult].
-  pdfExportSuccess,
-
   /// Either operation failed outright — see [BackupState.errorMessage].
   failure,
 }
@@ -41,34 +34,28 @@ class BackupState extends Equatable {
   final BackupStatus status;
   final ExportResult? exportResult;
   final ImportResult? importResult;
-  final PdfExportResult? pdfExportResult;
   final String? errorMessage;
 
   const BackupState({
     this.status = BackupStatus.idle,
     this.exportResult,
     this.importResult,
-    this.pdfExportResult,
     this.errorMessage,
   });
 
   bool get isBusy =>
-      status == BackupStatus.exporting ||
-      status == BackupStatus.importing ||
-      status == BackupStatus.exportingPdf;
+      status == BackupStatus.exporting || status == BackupStatus.importing;
 
   BackupState copyWith({
     BackupStatus? status,
     ExportResult? exportResult,
     ImportResult? importResult,
-    PdfExportResult? pdfExportResult,
     String? errorMessage,
   }) {
     return BackupState(
       status: status ?? this.status,
       exportResult: exportResult ?? this.exportResult,
       importResult: importResult ?? this.importResult,
-      pdfExportResult: pdfExportResult ?? this.pdfExportResult,
       errorMessage: errorMessage,
     );
   }
@@ -81,6 +68,5 @@ class BackupState extends Equatable {
   }
 
   @override
-  List<Object?> get props =>
-      [status, exportResult, importResult, pdfExportResult, errorMessage];
+  List<Object?> get props => [status, exportResult, importResult, errorMessage];
 }

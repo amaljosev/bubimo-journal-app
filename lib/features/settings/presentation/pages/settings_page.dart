@@ -63,9 +63,14 @@ class SettingsPage extends StatelessWidget {
                   onTap: () => context.push(AppRoutes.cloudBackup),
                 ),
                 SettingsListItem(
-                  icon: Icons.ios_share_rounded,
-                  label: 'Export Diary',
+                  icon: Icons.save_alt_rounded,
+                  label: 'Local Backup',
                   onTap: () => context.push(AppRoutes.importExport),
+                ),
+                SettingsListItem(
+                  icon: Icons.ios_share_rounded,
+                  label: 'Export as PDF or Text',
+                  onTap: () => context.push(AppRoutes.exportDiary),
                 ),
               ],
             ),

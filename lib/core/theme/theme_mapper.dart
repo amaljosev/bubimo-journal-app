@@ -4,8 +4,17 @@ import 'package:flutter/material.dart';
 
 import '../../../features/theme/domain/entities/app_theme_data.dart';
 import 'background_image_theme_extension.dart';
+import 'built_in_themes.dart';
 import 'font/safe_font_service.dart';
 import 'theme_data_builder.dart';
+
+/// Themes whose primary color is bright enough that [_onColorFor] picks
+/// black, but whose design calls for white foreground (FAB icon, filled
+/// button labels, etc.) on top of primary. Ocean's sky-blue primary sits
+/// right on the light/dark luminance boundary, so black wins by a hair.
+const Set<String> _whiteOnPrimaryThemeIds = {
+  BuiltInThemes.oceanId,
+};
 
 /// Converts a domain [AppThemeData] into a Flutter [ThemeData].
 ///
@@ -118,14 +127,16 @@ ThemeData buildThemeData(AppThemeData theme, SafeFontService fontService) {
   // near-white (which can clash with a strongly-tinted custom theme).
   final inverseSurface = isDark ? const Color(0xFFF5F5F5) : const Color(0xFF1A1A1A);
   final onInverseSurface = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F5);
-  final inversePrimary = _onColorFor(primaryColor) == Colors.white
-      ? primaryColor
-      : secondaryColor;
+  final onPrimary = _whiteOnPrimaryThemeIds.contains(theme.id)
+      ? Colors.white
+      : _onColorFor(primaryColor);
+  final inversePrimary =
+      onPrimary == Colors.white ? primaryColor : secondaryColor;
 
   final colorScheme = ColorScheme(
     brightness: brightness,
     primary: primaryColor,
-    onPrimary: _onColorFor(primaryColor),
+    onPrimary: onPrimary,
     secondary: secondaryColor,
     onSecondary: _onColorFor(secondaryColor),
     tertiary: secondaryColor,

@@ -327,11 +327,37 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _contentChangeScheduled = false;
       if (!mounted || _quillController == null) return;
+      _ensureFontOnNewText();
       final deltaJson = QuillDocumentUtils.contentFromController(
         _quillController!,
       );
       _bloc.add(DiaryFormContentChanged(deltaJson));
     });
+  }
+
+  /// The selected font applies to the whole description (see
+  /// [_applyFontFamily]), so any text typed without the font attribute
+  /// (Quill drops its pending "next typed text" style when the cursor moves
+  /// or focus changes) gets it applied here. Safe against loops: once every
+  /// text op carries the font, nothing is reformatted.
+  void _ensureFontOnNewText() {
+    final family = _bloc.state.fontFamily;
+    final controller = _quillController;
+    if (family == null || controller == null) return;
+
+    final missing = controller.document.toDelta().toList().any((op) {
+      if (!op.isInsert || op.data is! String) return false;
+      if ((op.data as String).trim().isEmpty) return false; // bare newlines
+      return op.attributes?['font'] != family;
+    });
+
+    if (missing) {
+      controller.formatText(
+        0,
+        controller.document.length,
+        quill.Attribute.fromKeyValue('font', family),
+      );
+    }
   }
 
   /// Whether the Quill document currently has any non-whitespace text.
@@ -703,11 +729,14 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
 
   void _applyFontFamily(String? fontFamily) {
     final controller = _quillController!;
-    controller.formatText(
-      0,
-      controller.document.length,
-      quill.Attribute.fromKeyValue('font', fontFamily),
-    );
+    final attribute = quill.Attribute.fromKeyValue('font', fontFamily);
+
+    // Existing text.
+    controller.formatText(0, controller.document.length, attribute);
+    // Text typed next (cursor-only / empty document). Without this, picking
+    // a font before typing styled nothing, since there was no text yet.
+    controller.formatSelection(attribute);
+
     _bloc.add(DiaryFormFontFamilyChanged(fontFamily));
 
     if (fontFamily == null) return;

@@ -3,7 +3,9 @@
 import 'package:bubimo/features/ads/data/services/ads_preference_service.dart';
 import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
 import 'package:bubimo/features/backgrounds/data/datasources/background_preset_cache_data_source.dart';
-import 'package:bubimo/features/backup/presentation/bloc/backup_bloc.dart';
+import 'package:bubimo/features/backup/presentation/bloc/backup/backup_bloc.dart';
+import 'package:bubimo/features/backup/presentation/bloc/export/bloc/export_bloc.dart';
+
 import 'package:bubimo/features/contact_us/data/repositories/contact_repository_impl.dart';
 import 'package:bubimo/features/contact_us/domain/repositories/contact_repository.dart';
 import 'package:bubimo/features/contact_us/domain/usecases/send_support_email.dart';
@@ -33,12 +35,16 @@ import '../../features/diary_entry/presentation/bloc/diary_form/diary_form_bloc.
 // backup (Import & Export)
 import '../../features/backup/data/datasources/backup_local_data_source.dart';
 import '../../features/backup/data/datasources/pdf_export_data_source.dart';
+import '../../features/backup/data/datasources/text_export_data_source.dart';
 import '../../features/backup/data/repositories/backup_repository_impl.dart';
 import '../../features/backup/data/repositories/pdf_export_repository_impl.dart';
+import '../../features/backup/data/repositories/text_export_repository_impl.dart';
 import '../../features/backup/domain/repositories/backup_repository.dart';
 import '../../features/backup/domain/repositories/pdf_export_repository.dart';
+import '../../features/backup/domain/repositories/text_export_repository.dart';
 import '../../features/backup/domain/usecases/export_diary_backup.dart';
 import '../../features/backup/domain/usecases/export_diary_pdf.dart';
+import '../../features/backup/domain/usecases/export_diary_text.dart';
 import '../../features/backup/domain/usecases/import_diary_backup.dart';
 
 // diary_entry (stickers)
@@ -235,6 +241,18 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => ExportDiaryPdf(getIt<PdfExportRepository>()),
   );
+  // "Download as TXT" — the plain-text sibling of the PDF export above.
+  // Same dependency shape (DiaryLocalDataSource only) and same reasoning
+  // for being its own repository rather than a method on another one.
+  getIt.registerLazySingleton<TextExportDataSource>(
+    () => TextExportDataSource(getIt<DiaryLocalDataSource>()),
+  );
+  getIt.registerLazySingleton<TextExportRepository>(
+    () => TextExportRepositoryImpl(getIt<TextExportDataSource>()),
+  );
+  getIt.registerLazySingleton(
+    () => ExportDiaryText(getIt<TextExportRepository>()),
+  );
   // Factory, not singleton — same reasoning as DiaryFormBloc just
   // above: a fresh instance per visit to the page, not one shared
   // instance whose stale exportResult/importResult could leak into a
@@ -243,7 +261,13 @@ Future<void> configureDependencies() async {
     () => BackupBloc(
       exportDiaryBackup: getIt<ExportDiaryBackup>(),
       importDiaryBackup: getIt<ImportDiaryBackup>(),
+    ),
+  );
+  // Export Diary screen (PDF + TXT) — factory for the same reason.
+  getIt.registerFactory(
+    () => ExportBloc(
       exportDiaryPdf: getIt<ExportDiaryPdf>(),
+      exportDiaryText: getIt<ExportDiaryText>(),
     ),
   );
 

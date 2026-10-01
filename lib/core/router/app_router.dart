@@ -18,6 +18,7 @@ import '../../../features/app_lock/presentation/pages/security_question_page.dar
 import '../../../features/app_lock/presentation/routing/app_lock_route_paths.dart';
 import '../../../features/app_lock/presentation/routing/lock_redirect.dart';
 import '../../../features/backup/presentation/pages/backup_restore_page.dart';
+import '../../../features/backup/presentation/pages/export_diary_page.dart';
 import '../../../features/cloud_backup/presentation/pages/cloud_backup_gate.dart';
 import '../../../features/diary_entry/presentation/pages/diary_entry_view_page.dart';
 import '../../../features/diary_entry/presentation/pages/diary_form_page.dart';
@@ -57,6 +58,7 @@ class AppRoutes {
   static const String settings = '/settings';
   static const String favorites = '/favorites';
   static const String importExport = '/import-export';
+  static const String exportDiary = '/export-diary';
   static const String cloudBackup = '/cloud-backup';
   static const String help = '/help';
   static const String helpDetail = '/help/detail';
@@ -298,6 +300,13 @@ final GoRouter appRouter = GoRouter(
       // starts at BackupStatus.idle and only does anything once the
       // user taps Export or picks an import file.
       builder: (context, state) => const BackupRestorePage(),
+    ),
+    GoRoute(
+      path: AppRoutes.exportDiary,
+      // ExportDiaryPage provides its own ExportBloc internally (via
+      // getIt, registered as a factory), same as AppRoutes.importExport
+      // above — nothing to load up front.
+      builder: (context, state) => const ExportDiaryPage(),
     ),
     GoRoute(
       path: AppRoutes.cloudBackup,

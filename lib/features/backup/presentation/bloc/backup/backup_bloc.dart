@@ -1,42 +1,35 @@
 // lib/features/backup/presentation/bloc/backup/backup_bloc.dart
 
+import 'package:bubimo/core/error/failures.dart';
+import 'package:bubimo/core/utils/downloads_directory_resolver.dart';
+import 'package:bubimo/features/backup/domain/entities/export_result.dart';
+import 'package:bubimo/features/backup/domain/entities/import_result.dart';
+import 'package:bubimo/features/backup/domain/usecases/export_diary_backup.dart';
+import 'package:bubimo/features/backup/domain/usecases/import_diary_backup.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../../../core/error/failures.dart';
-import '../../../../core/utils/downloads_directory_resolver.dart';
-import '../../domain/entities/export_result.dart';
-import '../../domain/entities/import_result.dart';
-import '../../domain/entities/pdf_export_result.dart';
-import '../../domain/usecases/export_diary_backup.dart';
-import '../../domain/usecases/export_diary_pdf.dart';
-import '../../domain/usecases/import_diary_backup.dart';
+
 
 part 'backup_event.dart';
 part 'backup_state.dart';
 
-/// Drives the combined Import & Export screen.
+/// Drives the Local Backup screen — creating and restoring `.bubimo`
+/// backup files.
 ///
-/// Deliberately one bloc for both `.bubimo` backup/restore AND PDF
-/// export rather than separate blocs per operation — all three share
-/// the exact same idle/running/success/failure state shape, and the
-/// screen presents them as actions on one page (not separate routes),
-/// so splitting them would mean multiple blocs independently
-/// reinventing identical status-tracking for no separation-of-concerns
-/// benefit.
+/// Readable exports (PDF / TXT) used to share this bloc but now live in
+/// [ExportBloc] on their own screen: mixing a restorable backup with a
+/// readable copy on one page confused users about which one to use.
 class BackupBloc extends Bloc<BackupEvent, BackupState> {
   final ExportDiaryBackup exportDiaryBackup;
   final ImportDiaryBackup importDiaryBackup;
-  final ExportDiaryPdf exportDiaryPdf;
 
   BackupBloc({
     required this.exportDiaryBackup,
     required this.importDiaryBackup,
-    required this.exportDiaryPdf,
   }) : super(const BackupState()) {
     on<BackupExportRequested>(_onExportRequested);
     on<BackupImportRequested>(_onImportRequested);
-    on<PdfExportRequested>(_onPdfExportRequested);
     on<BackupResultAcknowledged>(_onResultAcknowledged);
   }
 
@@ -96,32 +89,10 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
     emit(state.cleared(status: BackupStatus.idle));
   }
 
-  Future<void> _onPdfExportRequested(
-    PdfExportRequested event,
-    Emitter<BackupState> emit,
-  ) async {
-    if (state.isBusy) return;
-
-    emit(state.cleared(status: BackupStatus.exportingPdf));
-
-    final result = await exportDiaryPdf();
-
-    result.match(
-      (failure) => _emitFailureOrCancelled(failure, emit),
-      (pdfExportResult) => emit(
-        state.copyWith(
-          status: BackupStatus.pdfExportSuccess,
-          pdfExportResult: pdfExportResult,
-        ),
-      ),
-    );
-  }
-
-  /// Routes a failed export/import [Either] to the right state.
+  /// Routes a failed export [Either] to the right state.
   ///
   /// [ExportCancelledException]'s message (surfaced here as
-  /// [failure.message] after passing through
-  /// [BackupRepositoryImpl]/[PdfExportRepositoryImpl]'s
+  /// [failure.message] after passing through [BackupRepositoryImpl]'s
   /// `ExportCancelledException` catch clause) means the user simply
   /// closed the save-file dialog — not a real error, so this quietly
   /// returns to idle instead of surfacing a red failure banner the way

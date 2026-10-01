@@ -1,11 +1,9 @@
 // lib/features/backup/data/datasources/pdf_export_data_source.dart
 
-import 'dart:convert';
-
-import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../../../../core/utils/diary_export_utils.dart';
 import '../../../../core/utils/downloads_directory_resolver.dart';
 import '../../../diary_entry/data/datasources/diary_local_data_source.dart';
 import '../../../diary_entry/domain/entities/diary_entry.dart';
@@ -22,20 +20,19 @@ const String kPdfExportFileExtension = '.pdf';
 /// format, which DOES carry every image). Mixing the two concerns into
 /// one file format would blur what each is actually for.
 ///
+/// Title/body/date formatting lives in [DiaryExportUtils], shared with
+/// `TextExportDataSource`.
+///
 /// KNOWN LIMITATION: uses the `pdf` package's default Helvetica font,
 /// which only renders Latin-script text correctly. Entries containing
 /// non-Latin scripts (e.g. Arabic, Devanagari, CJK) will not render
 /// correctly until a bundled Unicode TTF font is added — out of scope
 /// for this pass since no such font asset exists in this project yet.
+/// The plain-text export has no such limit.
 class PdfExportDataSource {
   final DiaryLocalDataSource diaryLocalDataSource;
 
   const PdfExportDataSource(this.diaryLocalDataSource);
-
-  static const List<String> _monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
 
   Future<PdfExportResult> createPdf() async {
     final entries = await diaryLocalDataSource.getAllEntries();
@@ -66,7 +63,8 @@ class PdfExportDataSource {
 
     final bytes = await document.save();
 
-    final fileName = _generateFileName();
+    final fileName =
+        'bubimo_diary_${DiaryExportUtils.fileTimestamp()}$kPdfExportFileExtension';
     final (filePath, savedToPublicDownloads) = await saveToDownloads(
       bytes: bytes,
       fileName: fileName,
@@ -82,10 +80,8 @@ class PdfExportDataSource {
   }
 
   pw.Widget _buildEntrySection(DiaryEntry entry) {
-    final title = (entry.title?.trim().isNotEmpty ?? false)
-        ? entry.title!.trim()
-        : 'Untitled';
-    final body = _extractPlainText(entry.content ?? '');
+    final title = DiaryExportUtils.displayTitle(entry.title);
+    final body = DiaryExportUtils.extractPlainText(entry.content ?? '');
 
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 18),
@@ -93,7 +89,7 @@ class PdfExportDataSource {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            _formatDate(entry.date),
+            DiaryExportUtils.formatDate(entry.date),
             style: pw.TextStyle(
               fontSize: 10,
               color: PdfColors.grey700,
@@ -113,41 +109,4 @@ class PdfExportDataSource {
       ),
     );
   }
-
-  /// Parses Quill Delta JSON into plain text — mirrors
-  /// `DiaryFormBloc._extractPlainText`'s exact fallback behavior (if
-  /// [content] isn't valid Delta JSON, e.g. a legacy plain-text entry
-  /// from before the rich editor existed, the raw string is returned
-  /// unchanged) so both places agree on what "the entry's body text"
-  /// means.
-  String _extractPlainText(String content) {
-    final trimmed = content.trim();
-    if (trimmed.isEmpty) return '';
-
-    try {
-      final decoded = jsonDecode(trimmed);
-      final doc = quill.Document.fromJson(decoded as List);
-      return doc.toPlainText().trim();
-    } catch (_) {
-      return trimmed;
-    }
-  }
-
-  /// Formats a date as e.g. "Jan 5, 2025" without pulling in `intl` —
-  /// matches this project's existing convention of avoiding that
-  /// dependency (see `diary_form_bloc.dart`'s note on `intl` having
-  /// been eliminated in favor of static arrays/helpers).
-  String _formatDate(DateTime date) {
-    return '${_monthNames[date.month - 1]} ${date.day}, ${date.year}';
-  }
-
-  String _generateFileName() {
-    final now = DateTime.now();
-    final datePart =
-        '${now.year}${_twoDigits(now.month)}${_twoDigits(now.day)}'
-        '_${_twoDigits(now.hour)}${_twoDigits(now.minute)}';
-    return 'bubimo_diary_$datePart$kPdfExportFileExtension';
-  }
-
-  String _twoDigits(int value) => value.toString().padLeft(2, '0');
 }

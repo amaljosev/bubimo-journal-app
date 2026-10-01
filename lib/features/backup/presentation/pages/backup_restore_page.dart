@@ -1,19 +1,20 @@
 // lib/features/backup/presentation/pages/backup_restore_page.dart
 
-import 'package:bubimo/features/backup/presentation/bloc/backup_bloc.dart';
+import 'package:bubimo/features/backup/presentation/bloc/backup/backup_bloc.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
+import '../widgets/backup_result_dialog.dart';
+import '../widgets/backup_section_card.dart';
 
-/// Single screen for creating a local backup (`.bubimo` file),
-/// restoring diary entries from one, and downloading a human-readable
-/// PDF — see `app_drawer.dart`'s `onExportTap` wiring. Deliberately one
-/// screen for all three rather than separate ones (see [BackupBloc]'s
-/// doc comment) — the drawer's separate "Backup" item is reserved for
-/// a future cloud-sync feature and intentionally left un wired by this
-/// feature.
+/// Screen for creating a local backup (`.bubimo` file) and restoring
+/// diary entries from one.
+///
+/// Readable exports (PDF / TXT) used to live here too, but a backup you
+/// restore from and a copy you read looked too alike on one screen —
+/// they now have their own screen, `ExportDiaryPage`.
 class BackupRestorePage extends StatelessWidget {
   const BackupRestorePage({super.key});
 
@@ -45,10 +46,6 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
 
   Future<void> _handleExport(BuildContext context) async {
     context.read<BackupBloc>().add(const BackupExportRequested());
-  }
-
-  Future<void> _handleDownloadPdf(BuildContext context) async {
-    context.read<BackupBloc>().add(const PdfExportRequested());
   }
 
   Future<void> _handleImport(BuildContext context) async {
@@ -114,12 +111,11 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
         if (!didPop) Navigator.of(context).pop(_hasImportedEntries);
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('Import & Export')),
+        appBar: AppBar(title: const Text('Local Backup')),
         body: BlocConsumer<BackupBloc, BackupState>(
           listenWhen: (previous, current) =>
               current.status == BackupStatus.exportSuccess ||
               current.status == BackupStatus.importSuccess ||
-              current.status == BackupStatus.pdfExportSuccess ||
               current.status == BackupStatus.failure,
           listener: (context, state) {
             switch (state.status) {
@@ -127,12 +123,11 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
                 _showResultDialog(
                   context,
                   title: 'Backup created',
-                  message: state.exportResult!.savedToPublicDownloads
-                      ? 'Saved to your Downloads folder:\n'
-                          '${state.exportResult!.filePath}'
-                      : 'Saved inside the app\'s own storage (your device '
-                          'didn\'t make its Downloads folder available):\n'
-                          '${state.exportResult!.filePath}',
+                  message: savedLocationMessage(
+                    filePath: state.exportResult!.filePath,
+                    savedToPublicDownloads:
+                        state.exportResult!.savedToPublicDownloads,
+                  ),
                 );
               case BackupStatus.importSuccess:
                 setState(() => _hasImportedEntries = true);
@@ -141,90 +136,59 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
                   context,
                   title: 'Import complete',
                   message: result.skippedCount == 0
-                      ? 'Added ${result.importedCount} ${result.importedCount == 1 ? 'entry' : 'entries'} to your diary.'
-                      : 'Added ${result.importedCount} ${result.importedCount == 1 ? 'entry' : 'entries'} to your diary. '
-                          '${result.skippedCount} ${result.skippedCount == 1 ? 'entry' : 'entries'} in the file '
+                      ? 'Added ${entryCountLabel(result.importedCount)} to your diary.'
+                      : 'Added ${entryCountLabel(result.importedCount)} to your diary. '
+                          '${entryCountLabel(result.skippedCount)} in the file '
                           'couldn\'t be read and ${result.skippedCount == 1 ? 'was' : 'were'} skipped.',
                 );
-              case BackupStatus.pdfExportSuccess:
-                final result = state.pdfExportResult!;
+              case BackupStatus.failure:
                 _showResultDialog(
                   context,
-                  title: 'PDF ready',
-                  message:
-                      '${result.entryCount} ${result.entryCount == 1 ? 'entry' : 'entries'} saved as a readable PDF.\n\n'
-                      '${result.savedToPublicDownloads ? 'Saved to your Downloads folder:' : 'Saved inside the app\'s own storage (your device didn\'t make its Downloads folder available):'}\n'
-                      '${result.filePath}',
+                  title: 'Something went wrong',
+                  message: state.errorMessage ?? 'Please try again.',
                 );
-            case BackupStatus.failure:
-              _showResultDialog(
-                context,
-                title: 'Something went wrong',
-                message: state.errorMessage ?? 'Please try again.',
-              );
-            case BackupStatus.idle:
-            case BackupStatus.exporting:
-            case BackupStatus.importing:
-            case BackupStatus.exportingPdf:
-              break;
-          }
-        },
-        builder: (context, state) {
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-            children: [
-              _InfoBanner(colorScheme: colorScheme, textTheme: textTheme),
-              const SizedBox(height: 20),
-              _SectionCard(
-                icon: Icons.ios_share_rounded,
-                title: 'Backup',
-                description:
-                    'Creates a backup file containing every diary entry '
-                    '— including photos, stickers, and backgrounds. This '
-                    'file is only for restoring your diary later; it '
-                    'isn\'t meant to be opened or read directly.',
-                buttonLabel: 'Create backup',
-                isLoading: state.status == BackupStatus.exporting,
-                isEnabled: !state.isBusy,
-                onPressed: () => _handleExport(context),
-                colorScheme: colorScheme,
-                textTheme: textTheme,
-              ),
-              const SizedBox(height: 20),
-              _SectionCard(
-                icon: Icons.file_download_outlined,
-                title: 'Restore from backup',
-                description:
-                    'Add entries from a previously created backup file. '
-                    'Existing entries are never changed or removed — '
-                    'restored entries are always added alongside what\'s '
-                    'already in your diary, keeping their original dates.',
-                buttonLabel: 'Choose backup file',
-                isLoading: state.status == BackupStatus.importing,
-                isEnabled: !state.isBusy,
-                onPressed: () => _showImportConfirmation(context),
-                colorScheme: colorScheme,
-                textTheme: textTheme,
-              ),
-              const SizedBox(height: 20),
-              _SectionCard(
-                icon: Icons.picture_as_pdf_outlined,
-                title: 'Download as PDF',
-                description:
-                    'Creates a readable document with each entry\'s '
-                    'date, title, and text — no photos or stickers. '
-                    'Open it, share it, or print it. This is not a '
-                    'backup and can\'t be used to restore your diary.',
-                buttonLabel: 'Download PDF',
-                isLoading: state.status == BackupStatus.exportingPdf,
-                isEnabled: !state.isBusy,
-                onPressed: () => _handleDownloadPdf(context),
-                colorScheme: colorScheme,
-                textTheme: textTheme,
-              ),
-            ],
-          );
-        },
+              case BackupStatus.idle:
+              case BackupStatus.exporting:
+              case BackupStatus.importing:
+                break;
+            }
+          },
+          builder: (context, state) {
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+              children: [
+                _InfoBanner(colorScheme: colorScheme, textTheme: textTheme),
+                const SizedBox(height: 20),
+                BackupSectionCard(
+                  icon: Icons.ios_share_rounded,
+                  title: 'Create backup',
+                  description:
+                      'Creates a backup file containing every diary entry '
+                      '— including photos, stickers, and backgrounds. This '
+                      'file is only for restoring your diary later; it '
+                      'isn\'t meant to be opened or read directly.',
+                  buttonLabel: 'Create backup',
+                  isLoading: state.status == BackupStatus.exporting,
+                  isEnabled: !state.isBusy,
+                  onPressed: () => _handleExport(context),
+                ),
+                const SizedBox(height: 20),
+                BackupSectionCard(
+                  icon: Icons.file_download_outlined,
+                  title: 'Restore from backup',
+                  description:
+                      'Add entries from a previously created backup file. '
+                      'Existing entries are never changed or removed — '
+                      'restored entries are always added alongside what\'s '
+                      'already in your diary, keeping their original dates.',
+                  buttonLabel: 'Choose backup file',
+                  isLoading: state.status == BackupStatus.importing,
+                  isEnabled: !state.isBusy,
+                  onPressed: () => _showImportConfirmation(context),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -235,30 +199,16 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
     required String title,
     required String message,
   }) async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+    await showBackupResultDialog(context, title: title, message: message);
     if (context.mounted) {
       context.read<BackupBloc>().add(const BackupResultAcknowledged());
     }
   }
 }
 
-/// A short, always-visible explanation of the difference between a
-/// backup and a PDF export, shown above both sections so the choice is
-/// clear before the user taps anything — addresses the two options
-/// otherwise reading as near-duplicates ("Export" vs "Download as
-/// PDF") at a glance.
+/// A short, always-visible explanation of what a backup file is for,
+/// pointing readers who want a readable copy to the separate export
+/// screen.
 class _InfoBanner extends StatelessWidget {
   final ColorScheme colorScheme;
   final TextTheme textTheme;
@@ -279,139 +229,15 @@ class _InfoBanner extends StatelessWidget {
           Icon(Icons.info_outline_rounded, color: colorScheme.primary, size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  height: 1.4,
-                ),
-                children: [
-                  TextSpan(
-                    text: 'Backup',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                  const TextSpan(
-                    text:
-                        ' saves everything so you can restore your diary '
-                        'later — it\'s not something you open and read. ',
-                  ),
-                  TextSpan(
-                    text: 'Download as PDF',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                  const TextSpan(
-                    text:
-                        ' makes a readable copy of your entries to view, '
-                        'share, or print.',
-                  ),
-                ],
+            child: Text(
+              'A backup saves everything so you can restore your diary '
+              'later — it\'s not something you open and read. For a '
+              'readable copy, use Export as PDF or Text in Settings.',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                height: 1.4,
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A soft, rounded card for one action (export or import) — matches the
-/// app's existing surface language (`colorScheme.surface`, low-alpha
-/// shadow rather than Material elevation, generous rounded corners) per
-/// `AppDrawer`'s and `DiaryBottomToolbar`'s established styling.
-class _SectionCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String description;
-  final String buttonLabel;
-  final bool isLoading;
-  final bool isEnabled;
-  final VoidCallback onPressed;
-  final ColorScheme colorScheme;
-  final TextTheme textTheme;
-
-  const _SectionCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.buttonLabel,
-    required this.isLoading,
-    required this.isEnabled,
-    required this.onPressed,
-    required this.colorScheme,
-    required this.textTheme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: colorScheme.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: colorScheme.primary),
-              ),
-              const SizedBox(width: 12),
-              Flexible(
-                child: Text(
-                  title,
-                  style: textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            description,
-            style: textTheme.bodyMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: isEnabled ? onPressed : null,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : Text(buttonLabel),
           ),
         ],
       ),
