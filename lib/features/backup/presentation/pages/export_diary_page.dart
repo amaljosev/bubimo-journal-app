@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
+import 'package:bubimo/features/plus/domain/entities/plus_feature.dart';
+import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_gate.dart';
 import '../widgets/backup_result_dialog.dart';
 import '../widgets/backup_section_card.dart';
 
@@ -44,6 +47,7 @@ class _ExportDiaryView extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final isPlus = context.select<PlusBloc, bool>((b) => b.state.isPlus);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Export Diary')),
@@ -99,11 +103,18 @@ class _ExportDiaryView extends StatelessWidget {
                 note:
                     'Text in non-Latin scripts may not display correctly '
                     'in the PDF — use the text file for those.',
-                buttonLabel: 'Download PDF',
+                buttonLabel: isPlus ? 'Download PDF' : 'Download PDF (Plus)',
                 isLoading: state.status == ExportStatus.exportingPdf,
                 isEnabled: !state.isBusy,
-                onPressed: () =>
-                    context.read<ExportBloc>().add(const ExportPdfRequested()),
+                // PDF export is a Plus feature (TXT stays free).
+                onPressed: () async {
+                  final allowed = await PlusGate.require(
+                    context,
+                    PlusFeature.pdfExport,
+                  );
+                  if (!allowed || !context.mounted) return;
+                  context.read<ExportBloc>().add(const ExportPdfRequested());
+                },
               ),
               const SizedBox(height: 20),
               BackupSectionCard(

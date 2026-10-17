@@ -2,6 +2,16 @@
 
 import 'package:bubimo/features/ads/data/services/ads_preference_service.dart';
 import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
+import 'package:bubimo/features/plus/data/datasources/plus_iap_data_source.dart';
+import 'package:bubimo/features/plus/data/datasources/plus_local_data_source.dart';
+import 'package:bubimo/features/plus/data/repositories/plus_repository_impl.dart';
+import 'package:bubimo/features/plus/domain/repositories/plus_repository.dart';
+import 'package:bubimo/features/plus/domain/usecases/get_cached_plus_status.dart';
+import 'package:bubimo/features/plus/domain/usecases/get_plus_products.dart';
+import 'package:bubimo/features/plus/domain/usecases/refresh_plus_status.dart';
+import 'package:bubimo/features/plus/domain/usecases/start_plus_purchase.dart';
+import 'package:bubimo/features/plus/domain/usecases/watch_plus_purchase_outcomes.dart';
+import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
 import 'package:bubimo/features/backgrounds/data/datasources/background_preset_cache_data_source.dart';
 import 'package:bubimo/features/backup/presentation/bloc/backup/backup_bloc.dart';
 import 'package:bubimo/features/backup/presentation/bloc/export/bloc/export_bloc.dart';
@@ -629,5 +639,44 @@ getIt.registerFactory<BackgroundPickerBloc>(
   // also turns this off.
   getIt.registerLazySingleton<InterstitialAdService>(
     () => InterstitialAdService(getIt<AdsPreferenceService>()),
+  );
+
+  // --- plus (Bubimo Plus: Google Play Billing) ---
+  // PlusIapDataSource is the ONLY class that touches the
+  // in_app_purchase plugin; it must be a singleton because it owns the
+  // one subscription to Google's purchase stream. PlusLocalDataSource
+  // caches the last verified entitlement in SharedPreferences (not the
+  // SQLite database, so a restored backup can never carry Plus over).
+  getIt.registerLazySingleton(() => PlusIapDataSource());
+  getIt.registerLazySingleton(() => PlusLocalDataSource());
+  getIt.registerLazySingleton<PlusRepository>(
+    () => PlusRepositoryImpl(
+      iapDataSource: getIt<PlusIapDataSource>(),
+      localDataSource: getIt<PlusLocalDataSource>(),
+    ),
+  );
+  getIt.registerLazySingleton(
+    () => GetCachedPlusStatus(getIt<PlusRepository>()),
+  );
+  getIt.registerLazySingleton(() => RefreshPlusStatus(getIt<PlusRepository>()));
+  getIt.registerLazySingleton(() => GetPlusProducts(getIt<PlusRepository>()));
+  getIt.registerLazySingleton(() => StartPlusPurchase(getIt<PlusRepository>()));
+  getIt.registerLazySingleton(
+    () => WatchPlusPurchaseOutcomes(getIt<PlusRepository>()),
+  );
+
+  // Lazy singleton, NOT a factory — same reasoning as LockBloc /
+  // AppThemeCubit: every gate in the app (themes, backups, export,
+  // ads) reads this one shared instance, main.dart loads it before
+  // runApp, and it must keep listening to Google's purchase stream for
+  // the app's whole lifetime.
+  getIt.registerLazySingleton(
+    () => PlusBloc(
+      getCachedPlusStatus: getIt<GetCachedPlusStatus>(),
+      refreshPlusStatus: getIt<RefreshPlusStatus>(),
+      getPlusProducts: getIt<GetPlusProducts>(),
+      startPlusPurchase: getIt<StartPlusPurchase>(),
+      watchPlusPurchaseOutcomes: getIt<WatchPlusPurchaseOutcomes>(),
+    ),
   );
 }

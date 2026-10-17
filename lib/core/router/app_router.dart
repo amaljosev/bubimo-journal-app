@@ -34,6 +34,9 @@ import '../../../features/reminders/presentation/bloc/reminder_settings/reminder
 import '../../../features/reminders/presentation/bloc/reminder_settings/reminder_settings_event.dart';
 import '../../../features/reminders/presentation/pages/reminder_settings_page.dart';
 import '../../../features/settings/presentation/pages/settings_page.dart';
+import '../../../features/plus/domain/entities/plus_feature.dart';
+import '../../../features/plus/presentation/pages/plus_paywall_page.dart';
+import '../../../features/plus/presentation/routing/plus_route_paths.dart';
 import '../../../features/theme/domain/entities/app_theme_data.dart';
 import '../../../features/theme/presentation/pages/custom_theme_screen.dart';
 
@@ -61,6 +64,7 @@ class AppRoutes {
   static const String exportDiary = '/export-diary';
   static const String cloudBackup = '/cloud-backup';
   static const String help = '/help';
+  static const String plus = PlusRoutePaths.paywall;
   static const String helpDetail = '/help/detail';
   static const String appLockSettings = AppLockRoutePaths.settings;
   static const String appLockPinCreate = AppLockRoutePaths.pinCreate;
@@ -385,6 +389,16 @@ final GoRouter appRouter = GoRouter(
       ),
     ),
 
+    GoRoute(
+      path: AppRoutes.plus,
+      // PlusBloc is provided at the app root (see main.dart), so the
+      // paywall just reads it from context. `extra` optionally carries
+      // the PlusFeature the user tapped, so the paywall can open with
+      // a line about it — omit it (e.g. from Settings) for the
+      // generic paywall / member screen.
+      builder: (context, state) =>
+          PlusPaywallPage(feature: state.extra as PlusFeature?),
+    ),
     GoRoute(
       path: AppRoutes.help,
       builder: (context, state) => const HelpScreen(),

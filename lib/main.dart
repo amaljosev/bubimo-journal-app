@@ -17,6 +17,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/di/injection.dart';
 import 'core/theme/font/safe_font_service.dart';
 import 'features/app_lock/presentation/bloc/lock_bloc.dart';
+import 'features/plus/presentation/bloc/plus_bloc.dart';
 import 'features/theme/presentation/cubit/app_theme_cubit.dart';
 
 /// Kept alive for the app's lifetime — [AppLifecycleListener] stops
@@ -72,6 +73,19 @@ void main() {
       // so the app doesn't flash the fallback default theme on launch.
       await getIt<AppThemeCubit>().loadInitialTheme();
 
+      // Load the cached Plus entitlement before the first frame too, so
+      // gated UI (themes, ads, export) is already correct. Only the
+      // fast, offline-safe cache read is awaited here — the check
+      // against Google Play runs in the background (PlusBloc._onStarted)
+      // and never delays startup. Listen BEFORE adding the event so the
+      // `loaded` emission can't be missed.
+      final plusBloc = getIt<PlusBloc>();
+      final plusLoaded = plusBloc.stream.firstWhere(
+        (state) => state.loadStatus == PlusLoadStatus.loaded,
+      );
+      plusBloc.add(const PlusStarted());
+      await plusLoaded;
+
       // Load the persisted app-lock config before the first frame too, and
       // AWAIT it — appRouter's `redirect` (see lockRedirect in
       // app_router.dart) reads LockBloc.state synchronously on every
@@ -110,9 +124,35 @@ void main() {
       unawaited(getIt<SafeFontService>().precacheAllKnownFonts());
       getIt<SafeFontService>().startBackgroundRetry();
       lifecycleListener = AppLifecycleListener(
-        onResume: () => getIt<SafeFontService>().onAppResumed(),
+        onResume: () {
+          getIt<SafeFontService>().onAppResumed();
+          // Pick up renewals, cancellations and refunds that happened
+          // while the app was in the background.
+          getIt<PlusBloc>().add(const PlusRefreshRequested());
+        },
       );
       await getIt<AdsPreferenceService>().loadInitial();
+
+      // Apply the entitlement to the two things that depend on it:
+      // ads (free users always see ads; Plus users choose) and the
+      // active theme (a lapsed user falls back to the default theme —
+      // their custom themes stay saved, just locked).
+      getIt<AdsPreferenceService>().applyPlusStatus(plusBloc.state.isPlus);
+      if (!plusBloc.state.isPlus) {
+        // Default theme uses the bundled font, so this doesn't wait on
+        // the network.
+        await getIt<AppThemeCubit>().deactivateCustomThemeIfActive();
+      }
+      // Same two reactions whenever Plus changes later — a purchase, a
+      // restore, or the background Play check finding a lapse. App-
+      // lifetime subscription: PlusBloc is a singleton that never
+      // closes, so there is nothing to cancel.
+      plusBloc.stream.map((state) => state.plus).distinct().listen((plus) {
+        getIt<AdsPreferenceService>().applyPlusStatus(plus.isPlus);
+        if (!plus.isPlus) {
+          unawaited(getIt<AppThemeCubit>().deactivateCustomThemeIfActive());
+        }
+      });
       // 1. Await AdMob initialization before starting the app
       try {
         await MobileAds.instance.initialize();
@@ -145,6 +185,10 @@ class DiaryApp extends StatelessWidget {
         // getIt<LockBloc>() directly, not via context) all need the
         // one shared LockBloc instance loaded above.
         BlocProvider<LockBloc>.value(value: getIt<LockBloc>()),
+        // Provided at the app root so every gate (theme screen, export
+        // page, ads toggle) and the paywall read the one shared
+        // instance main() loaded above.
+        BlocProvider<PlusBloc>.value(value: getIt<PlusBloc>()),
       ],
       child: BlocBuilder<AppThemeCubit, ThemeData>(
         builder: (context, themeData) {

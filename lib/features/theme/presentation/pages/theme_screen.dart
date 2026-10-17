@@ -1,5 +1,8 @@
 // lib/features/theme/presentation/pages/theme_screen.dart
 
+import 'package:bubimo/features/plus/domain/entities/plus_feature.dart';
+import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_gate.dart';
 import 'package:bubimo/features/shared/presentation/widgets/appbar_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -51,6 +54,23 @@ class _ThemeScreenState extends State<ThemeScreen>
     if (_isNavigatingToCustomThemeScreen) return;
     _isNavigatingToCustomThemeScreen = true;
 
+    // Custom themes are a Plus feature. Free users see the paywall; the
+    // navigation flag above stays set meanwhile so a double-tap can't
+    // stack two paywalls.
+    final allowed = await PlusGate.require(context, PlusFeature.customThemes);
+    if (!allowed) {
+      if (context.mounted) {
+        setState(() => _isNavigatingToCustomThemeScreen = false);
+      } else {
+        _isNavigatingToCustomThemeScreen = false;
+      }
+      return;
+    }
+    if (!context.mounted) {
+      _isNavigatingToCustomThemeScreen = false;
+      return;
+    }
+
     final result = await context.push<bool>(AppRoutes.customThemeScreen);
 
     if (context.mounted) {
@@ -70,6 +90,20 @@ class _ThemeScreenState extends State<ThemeScreen>
   ) async {
     if (_isNavigatingToCustomThemeScreen) return;
     _isNavigatingToCustomThemeScreen = true;
+
+    final allowed = await PlusGate.require(context, PlusFeature.customThemes);
+    if (!allowed) {
+      if (context.mounted) {
+        setState(() => _isNavigatingToCustomThemeScreen = false);
+      } else {
+        _isNavigatingToCustomThemeScreen = false;
+      }
+      return;
+    }
+    if (!context.mounted) {
+      _isNavigatingToCustomThemeScreen = false;
+      return;
+    }
 
     final result = await context.push<bool>(
       AppRoutes.customThemeScreen,
@@ -459,6 +493,7 @@ class _CustomThemesTab extends StatelessWidget {
     // user visible feedback too — the button greys out immediately
     // instead of silently swallowing the extra taps.
     final canNavigate = !isNavigating;
+    final isPlus = context.select<PlusBloc, bool>((b) => b.state.isPlus);
 
     return CustomScrollView(
       key: const PageStorageKey('custom_themes_tab'),
@@ -474,7 +509,7 @@ class _CustomThemesTab extends StatelessWidget {
               onPressed: (state.canAddCustomTheme && canNavigate)
                   ? onAdd
                   : null,
-              icon: const Icon(Icons.add),
+              icon: Icon(isPlus ? Icons.add : Icons.lock_outline_rounded),
               label: Text(
                 state.canAddCustomTheme
                     ? 'Add Custom Theme'
@@ -510,9 +545,16 @@ class _CustomThemesTab extends StatelessWidget {
                     theme: theme,
                     isActive: theme.id == state.activeThemeId,
                     isEnabled: !state.isActionInProgress,
-                    onApply: () => context.read<ThemeListBloc>().add(
-                      ThemeListThemeApplied(theme.id),
-                    ),
+                    onApply: () async {
+                      final allowed = await PlusGate.require(
+                        context,
+                        PlusFeature.customThemes,
+                      );
+                      if (!allowed || !context.mounted) return;
+                      context.read<ThemeListBloc>().add(
+                        ThemeListThemeApplied(theme.id),
+                      );
+                    },
                     onEdit: canNavigate ? () => onEdit(theme) : () {},
                     onDelete: () => onDelete(theme),
                   );

@@ -162,3 +162,33 @@ final class AppUpdateFailure extends Failure {
     super.message = 'Could not check for updates right now.',
   ]);
 }
+
+/// Google Play Billing couldn't be reached or the store itself is the
+/// problem — Play Store missing/outdated, billing client error, or a
+/// Plus product that isn't available. Distinct from [NetworkFailure]
+/// since the fix is on the Play side, not the app's own requests.
+/// `PlusBloc` keeps the cached entitlement when a background refresh
+/// fails with this; it only surfaces it for explicit actions (loading
+/// the paywall, "Restore purchases").
+final class StoreUnavailableFailure extends Failure {
+  const StoreUnavailableFailure([
+    super.message =
+        'Couldn\'t reach Google Play. Check your connection and try again.',
+  ]);
+}
+
+/// A Plus purchase failed after Google Play's purchase sheet was
+/// involved (payment declined, item already owned, sheet wouldn't
+/// open). Carries the store's message.
+final class PurchaseFailure extends Failure {
+  const PurchaseFailure([
+    super.message = 'The purchase could not be completed.',
+  ]);
+}
+
+/// The user closed Google Play's purchase sheet without paying. Kept
+/// distinct from [PurchaseFailure] so the bloc returns to idle silently
+/// instead of showing an error — same idea as [AuthCancelledFailure].
+final class PurchaseCancelledFailure extends Failure {
+  const PurchaseCancelledFailure([super.message = 'Purchase cancelled.']);
+}

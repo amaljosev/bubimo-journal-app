@@ -24,7 +24,7 @@ Future<void> showBackupResultDialog(
   );
 }
 
-/// "Saved to your Downloads folder: <path>" — or the app-storage
+/// "Saved to your Downloads folder: < path >" — or the app-storage
 /// fallback wording when the device didn't expose Downloads.
 String savedLocationMessage({
   required String filePath,

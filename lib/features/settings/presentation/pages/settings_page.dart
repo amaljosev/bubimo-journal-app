@@ -6,6 +6,7 @@ import 'package:bubimo/core/network/internet_gate.dart';
 import 'package:bubimo/core/router/app_router.dart';
 import 'package:bubimo/core/utils/url_launcher_helper.dart';
 import 'package:bubimo/features/contact_us/presentation/widgets/contact_us_sheet.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_settings_tile.dart';
 import 'package:bubimo/features/settings/presentation/widgets/about_app_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -49,6 +50,11 @@ class SettingsPage extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
+            SettingsSection(
+              title: 'Bubimo Plus',
+              children: const [PlusSettingsTile()],
+            ),
+            const SizedBox(height: 20),
             SettingsSection(
               title: 'Data & Security',
               children: [

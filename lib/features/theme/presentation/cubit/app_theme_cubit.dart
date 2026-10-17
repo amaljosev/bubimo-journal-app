@@ -116,6 +116,18 @@ class AppThemeCubit extends Cubit<ThemeData> {
     return _refreshFromRepository();
   }
 
+  /// Called when Bubimo Plus is not active: if a CUSTOM theme is
+  /// currently applied, falls back to the default theme.
+  ///
+  /// Non-destructive on purpose — the custom themes themselves stay
+  /// saved in the database, so they're all still there if the user
+  /// subscribes again. Built-in themes are never touched.
+  Future<void> deactivateCustomThemeIfActive() async {
+    final theme = currentTheme;
+    if (theme == null || theme.isBuiltIn) return;
+    await resetToDefault();
+  }
+
   Future<Either<Failure, void>> _refreshFromRepository() async {
     final selectedResult = await getSelectedTheme();
     return selectedResult.match(

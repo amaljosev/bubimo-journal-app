@@ -1,22 +1,26 @@
-// lib/core/ads/ads_toggle_tile.dart
+// lib/features/ads/presentation/widgets/ads_toggle_tile.dart
 
+import 'package:bubimo/features/plus/domain/entities/plus_feature.dart';
+import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_gate.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../data/services/ads_preference_service.dart';
 
-/// A Settings row with a toggle switch for turning banner ads on/off.
+/// A Settings row with a toggle switch for showing ads.
 ///
 /// Visually mirrors `SettingsListItem` (icon + label, sitting inside
 /// the same rounded `SettingsSection` card) but with a trailing
-/// [Switch] instead of a chevron, since this row doesn't navigate
-/// anywhere — it flips [AdsPreferenceService.adsEnabled] directly.
+/// [Switch] instead of a chevron.
 ///
-/// This is a manual, user-facing toggle for now. Once in-app purchases
-/// ship, a "remove ads" purchase should call
-/// `getIt<AdsPreferenceService>().setAdsEnabled(false)` the same way
-/// this switch does — nothing here or in [BannerAdWidget] needs to
-/// change when that lands.
+/// Turning ads OFF is a Bubimo Plus feature:
+/// - Free users see the switch ON (ads are always on for them). If
+///   they try to switch it off, the Plus paywall opens instead; once
+///   they become members, ads switch off automatically (see
+///   [AdsPreferenceService]).
+/// - Plus members can switch ads off and back on freely.
 class AdsToggleTile extends StatelessWidget {
   const AdsToggleTile({super.key});
 
@@ -24,6 +28,7 @@ class AdsToggleTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final adsPreference = getIt<AdsPreferenceService>();
+    final isPlus = context.select<PlusBloc, bool>((b) => b.state.isPlus);
 
     return ValueListenableBuilder<bool>(
       valueListenable: adsPreference.adsEnabled,
@@ -48,9 +53,28 @@ class AdsToggleTile extends StatelessWidget {
                   ),
                 ),
               ),
+              if (!isPlus) ...[
+                Icon(
+                  Icons.lock_outline_rounded,
+                  size: 18,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+              ],
               Switch.adaptive(
                 value: adsEnabled,
-                onChanged: adsPreference.setAdsEnabled,
+                onChanged: (wantsAds) async {
+                  if (!isPlus) {
+                    // Free users can't turn ads off — show the
+                    // paywall. The switch value only changes if they
+                    // become members (via applyPlusStatus).
+                    if (!wantsAds) {
+                      await PlusGate.require(context, PlusFeature.removeAds);
+                    }
+                    return;
+                  }
+                  await adsPreference.setAdsEnabled(wantsAds);
+                },
               ),
             ],
           ),
