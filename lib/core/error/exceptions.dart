@@ -162,3 +162,13 @@ class FontDownloadException extends AppException {
 class AppUpdateException extends AppException {
   const AppUpdateException({required super.message});
 }
+
+/// Thrown when the signed-in Google account has no room left in Drive
+/// for the cloud backup — either found by the pre-upload space check
+/// or reported by Drive itself (`storageQuotaExceeded`). Kept distinct
+/// from [CloudBackupException] so the screen can offer "Use another
+/// account" instead of just an error message. Carries an already
+/// user-facing message.
+class CloudStorageFullException extends AppException {
+  const CloudStorageFullException({required super.message});
+}

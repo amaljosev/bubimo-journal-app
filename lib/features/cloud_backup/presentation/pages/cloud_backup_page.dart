@@ -69,6 +69,37 @@ class _CloudBackupViewState extends State<_CloudBackupView> {
     );
   }
 
+  /// Shown when the linked account's Drive has no room for the backup.
+  /// Offers a one-tap way to sign out and pick a different account.
+  Future<void> _showStorageFullDialog(
+    BuildContext context, {
+    required String message,
+  }) async {
+    final switchAccount = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.cloud_off_outlined),
+        title: const Text('Not enough space in Google Drive'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('OK'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Use another account'),
+          ),
+        ],
+      ),
+    );
+    if (switchAccount == true && context.mounted) {
+      context.read<CloudBackupBloc>().add(
+        const CloudBackupSwitchAccountRequested(),
+      );
+    }
+  }
+
   Future<void> _confirmRestore(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -144,6 +175,13 @@ class _CloudBackupViewState extends State<_CloudBackupView> {
                   current.message != null),
           listener: (context, state) {
             if (state.status == CloudBackupStatus.failure) {
+              if (state.storageFull) {
+                _showStorageFullDialog(
+                  context,
+                  message: state.message ?? 'Not enough space in Google Drive.',
+                );
+                return;
+              }
               _showResultDialog(
                 context,
                 title: 'Something went wrong',

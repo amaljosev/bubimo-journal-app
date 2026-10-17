@@ -43,6 +43,12 @@ final class CloudBackupDeleteRequested extends CloudBackupEvent {
   const CloudBackupDeleteRequested();
 }
 
+/// Signs out and immediately opens the account picker again — offered
+/// when the linked account's Drive has no space left.
+final class CloudBackupSwitchAccountRequested extends CloudBackupEvent {
+  const CloudBackupSwitchAccountRequested();
+}
+
 /// Fired internally by the bloc as the repository reports progress.
 final class _CloudBackupProgressUpdated extends CloudBackupEvent {
   final CloudBackupPhase phase;

@@ -69,6 +69,18 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
 
   // ── Auth ──────────────────────────────────────────────────────────
 
+  /// "12.4 MB", "830 KB", "1.2 GB" — for the not-enough-space message.
+  String _formatBytes(int bytes) {
+    if (bytes < 1024 * 1024) {
+      final kb = bytes <= 0 ? 0 : (bytes / 1024).ceil();
+      return '$kb KB';
+    }
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
   @override
   Future<Either<Failure, String>> signIn() async {
     try {
@@ -147,20 +159,33 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
       onProgress?.call(CloudBackupPhase.buildingArchive);
       final archive = await backupLocalDataSource.buildBackupArchive();
 
-      // Enforce the single-snapshot policy: remove the previous backup
-      // (if any) before uploading the new one, so Drive never briefly
-      // holds two full backups and never accumulates stale ones.
-      final existing = await driveDataSource.findCurrentBackupFile();
+      // Enforce the single-snapshot policy WITHOUT ever deleting the old
+      // backup before the new one is safely uploaded: the existing
+      // file's content is replaced in place, so if the upload fails
+      // (Drive full, connection drops) the previous backup is still
+      // there instead of having been deleted first and lost.
+      final existingFiles = await driveDataSource.listBackupFiles();
+      final existing = existingFiles.isEmpty ? null : existingFiles.first;
       final existingId = existing?.id;
-      if (existingId != null) {
-        try {
-          await driveDataSource.deleteFile(existingId);
-        } catch (_) {
-          // If deleting the old one fails, still proceed with the
-          // upload below — the old file only becomes truly orphaned if
-          // the upload also fails, and failing the whole backup over a
-          // delete that isn't strictly required first is worse for the
-          // user than a possible stale duplicate.
+      final existingSize = int.tryParse(existing?.size ?? '') ?? 0;
+
+      // Courtesy pre-check so a full Drive is reported immediately, with
+      // real numbers, instead of after a long failed upload. The old
+      // backup's size is credited since it is being replaced. Skipped
+      // silently when the quota can't be read or the account is
+      // unlimited — the upload itself still reports a full Drive.
+      final quota = await driveDataSource.getStorageQuota();
+      if (quota != null) {
+        final extraNeeded = archive.bytes.length - existingSize;
+        final free = quota.freeBytes < 0 ? 0 : quota.freeBytes;
+        if (extraNeeded > free) {
+          throw CloudStorageFullException(
+            message:
+                'There isn\'t enough free space in this Google Drive. Your '
+                'backup needs about ${_formatBytes(extraNeeded)} more, and '
+                'only ${_formatBytes(free)} is free. Free up space in '
+                'Google Drive, or use a different Google account.',
+          );
         }
       }
 
@@ -172,7 +197,18 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
           createdAt: now,
           entryCount: archive.entryCount,
         ),
+        existingFileId: existingId,
       );
+
+      // Best effort: remove any stray extra copies an older upload may
+      // have left behind. Failing here never fails the backup.
+      for (final extra in existingFiles.skip(1)) {
+        final extraId = extra.id;
+        if (extraId == null || extraId == uploaded.id) continue;
+        try {
+          await driveDataSource.deleteFile(extraId);
+        } catch (_) {}
+      }
 
       return Right(CloudBackupManifestModel.fromDriveFile(uploaded));
     } on NoInternetException catch (e) {
@@ -185,6 +221,8 @@ class CloudBackupRepositoryImpl implements CloudBackupRepository {
       return Left(AuthFailure(e.message));
     } on CloudBackupException catch (e) {
       return Left(CloudBackupFailure(e.message));
+    } on CloudStorageFullException catch (e) {
+      return Left(CloudStorageFullFailure(e.message));
     } on MediaStorageException catch (e) {
       return Left(MediaStorageFailure(e.message));
     } catch (e) {

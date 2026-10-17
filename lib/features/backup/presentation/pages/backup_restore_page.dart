@@ -1,6 +1,10 @@
 // lib/features/backup/presentation/pages/backup_restore_page.dart
 
 import 'package:bubimo/features/backup/presentation/bloc/backup/backup_bloc.dart';
+import 'package:bubimo/features/plus/domain/entities/plus_feature.dart';
+import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_feature_banner.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_gate.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -45,6 +49,10 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
   bool _hasImportedEntries = false;
 
   Future<void> _handleExport(BuildContext context) async {
+    // Creating a backup is a Bubimo Plus feature; restoring from a
+    // backup file stays free for everyone (see _handleImport).
+    final allowed = await PlusGate.require(context, PlusFeature.localBackup);
+    if (!allowed || !context.mounted) return;
     context.read<BackupBloc>().add(const BackupExportRequested());
   }
 
@@ -104,6 +112,7 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final isPlus = context.select<PlusBloc, bool>((b) => b.state.isPlus);
 
     return PopScope(
       canPop: false,
@@ -159,6 +168,12 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
               children: [
                 _InfoBanner(colorScheme: colorScheme, textTheme: textTheme),
                 const SizedBox(height: 20),
+                const PlusFeatureBanner(
+                  feature: PlusFeature.localBackup,
+                  message:
+                      'Creating backups is a Bubimo Plus feature. '
+                      'Restoring from a backup file is always free.',
+                ),
                 BackupSectionCard(
                   icon: Icons.ios_share_rounded,
                   title: 'Create backup',
@@ -167,7 +182,7 @@ class _BackupRestoreViewState extends State<_BackupRestoreView> {
                       '— including photos, stickers, and backgrounds. This '
                       'file is only for restoring your diary later; it '
                       'isn\'t meant to be opened or read directly.',
-                  buttonLabel: 'Create backup',
+                  buttonLabel: isPlus ? 'Create backup' : 'Create backup (Plus)',
                   isLoading: state.status == BackupStatus.exporting,
                   isEnabled: !state.isBusy,
                   onPressed: () => _handleExport(context),

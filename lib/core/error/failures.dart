@@ -192,3 +192,14 @@ final class PurchaseFailure extends Failure {
 final class PurchaseCancelledFailure extends Failure {
   const PurchaseCancelledFailure([super.message = 'Purchase cancelled.']);
 }
+
+/// The signed-in Google account has no room left in Drive for the
+/// cloud backup. Mirrors [CloudStorageFullException]. Distinct from
+/// [CloudBackupFailure] so the cloud backup screen can respond with a
+/// dedicated "not enough space" dialog and a "Use another account"
+/// action rather than a generic error.
+final class CloudStorageFullFailure extends Failure {
+  const CloudStorageFullFailure([
+    super.message = 'There isn\'t enough free space in this Google Drive.',
+  ]);
+}

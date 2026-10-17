@@ -28,6 +28,7 @@ class CloudBackupBloc extends Bloc<CloudBackupEvent, CloudBackupState> {
     on<CloudBackupStatusRequested>(_onStatusRequested);
     on<CloudBackupRestoreRequested>(_onRestore);
     on<CloudBackupDeleteRequested>(_onDelete);
+    on<CloudBackupSwitchAccountRequested>(_onSwitchAccount);
     on<_CloudBackupProgressUpdated>(_onProgress);
   }
 
@@ -146,6 +147,7 @@ class CloudBackupBloc extends Bloc<CloudBackupEvent, CloudBackupState> {
           status: CloudBackupStatus.failure,
           message: failure.message,
           phase: null,
+          storageFull: failure is CloudStorageFullFailure,
         ),
       ),
       (meta) => emit(
@@ -256,5 +258,34 @@ class CloudBackupBloc extends Bloc<CloudBackupEvent, CloudBackupState> {
     // operation has already resolved.
     if (state.status != CloudBackupStatus.busy) return;
     emit(state.copyWith(phase: event.phase));
+  }
+
+  // ── Switch account ────────────────────────────────────────────────
+
+  /// Signs out, then immediately reopens the Google account picker, so
+  /// someone whose Drive is full can pick a different account in one
+  /// step.
+  Future<void> _onSwitchAccount(
+    CloudBackupSwitchAccountRequested event,
+    Emitter<CloudBackupState> emit,
+  ) async {
+    final result = await repository.signOut();
+    result.fold(
+      (failure) => emit(
+        state.copyWith(
+          status: CloudBackupStatus.failure,
+          message: failure.message,
+        ),
+      ),
+      (_) {
+        emit(
+          const CloudBackupState(
+            status: CloudBackupStatus.idle,
+            isSignedIn: false,
+          ),
+        );
+        add(const CloudBackupSignInRequested());
+      },
+    );
   }
 }

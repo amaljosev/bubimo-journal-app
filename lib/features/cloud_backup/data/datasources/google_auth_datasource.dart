@@ -2,6 +2,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 
@@ -133,18 +134,56 @@ class GoogleAuthDataSource {
     } on AuthCancelledException {
       rethrow;
     } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) {
-        throw const AuthCancelledException(message: 'Cancelled');
-      }
-      throw AuthException(
-        message: e.description ?? 'Google sign-in failed.',
-      );
+      throw _mapSignInException(e);
     } on Exception catch (e) {
       // Covers platform-level failures (e.g. access_denied,
       // network_error, sign_in_required) surfaced during
       // authorizeScopes on Android that aren't GoogleSignInExceptions.
-      throw AuthException(message: 'Drive authorization failed: $e');
+      debugPrint('GoogleAuthDataSource: Drive authorization failed: $e');
+      throw AuthException(
+        message:
+            'Couldn\'t get permission to use Google Drive. Please try '
+            'again.${kDebugMode ? ' [$e]' : ''}',
+      );
     }
+  }
+
+  /// Turns a [GoogleSignInException] into this app's exception types.
+  ///
+  /// On Android a genuine dismissal of the account picker is reported
+  /// as `canceled` — but so are real credential/configuration
+  /// failures, typically "[16] Account reauth failed" (for example the
+  /// signing key's SHA-1 isn't registered on the OAuth client, which
+  /// is the usual cause when sign-in works from `flutter run` but not
+  /// from a Play Store install). Treating every `canceled` as a silent
+  /// dismissal hid those failures: the user picked an account and just
+  /// landed back on the sign-in button with no message. Now only a
+  /// description that actually says "cancel" (or none at all) is
+  /// silent; everything else is surfaced, and the raw code/description
+  /// is always printed to the debug console so the real reason is
+  /// visible.
+  Exception _mapSignInException(GoogleSignInException e) {
+    final description = e.description ?? '';
+    final lower = description.toLowerCase();
+    debugPrint(
+      'GoogleAuthDataSource: sign-in failed — code=${e.code.name}, '
+      'description="$description", details=${e.details}',
+    );
+
+    if (e.code == GoogleSignInExceptionCode.canceled &&
+        (lower.isEmpty || lower.contains('cancel'))) {
+      return const AuthCancelledException(message: 'Cancelled');
+    }
+    if (e.code.name == 'interrupted') {
+      return const AuthCancelledException(message: 'Sign-in was interrupted.');
+    }
+
+    return AuthException(
+      message:
+          'Couldn\'t sign in with Google. Please check your connection '
+          'and that Google Play services is up to date, then try '
+          'again.${kDebugMode ? ' [${e.code.name}: $description]' : ''}',
+    );
   }
 
   /// Non-interactive (silent) sign-in. Returns true if a signed-in
@@ -213,6 +252,10 @@ class GoogleAuthDataSource {
       if (e.code == GoogleSignInExceptionCode.canceled) {
         throw const AuthCancelledException(message: 'Cancelled');
       }
+      debugPrint(
+        'GoogleAuthDataSource: authorization failed — code=${e.code.name}, '
+        'description="${e.description}"',
+      );
       throw const AuthExpiredException(message: 'Authorization expired.');
     } catch (e) {
       throw AuthException(message: e.toString());

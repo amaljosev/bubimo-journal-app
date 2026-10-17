@@ -53,6 +53,11 @@ class CloudBackupState extends Equatable {
   final String? message;
   final CloudBackupPhase? phase;
 
+  /// True when the latest failure was "this Drive has no space left", so
+  /// the screen can offer "Use another account". Like [message] and
+  /// [phase], it resets on every `copyWith` that doesn't set it.
+  final bool storageFull;
+
   const CloudBackupState({
     this.status = CloudBackupStatus.idle,
     this.isSignedIn = false,
@@ -61,6 +66,7 @@ class CloudBackupState extends Equatable {
     this.restoredCount,
     this.message,
     this.phase,
+    this.storageFull = false,
   });
 
   bool get isBusy => status == CloudBackupStatus.busy;
@@ -74,6 +80,7 @@ class CloudBackupState extends Equatable {
     int? restoredCount,
     String? message,
     CloudBackupPhase? phase,
+    bool storageFull = false,
   }) {
     return CloudBackupState(
       status: status ?? this.status,
@@ -85,6 +92,7 @@ class CloudBackupState extends Equatable {
       restoredCount: restoredCount ?? this.restoredCount,
       message: message,
       phase: phase,
+      storageFull: storageFull,
     );
   }
 
@@ -97,5 +105,6 @@ class CloudBackupState extends Equatable {
         restoredCount,
         message,
         phase,
+        storageFull,
       ];
 }

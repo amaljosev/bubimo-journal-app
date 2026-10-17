@@ -1,5 +1,7 @@
 // lib/features/cloud_backup/presentation/pages/cloud_backup_gate.dart
 
+import 'package:bubimo/features/plus/domain/entities/plus_feature.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_gate.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
@@ -40,6 +42,13 @@ class CloudBackupGate extends StatefulWidget {
 class _CloudBackupGateState extends State<CloudBackupGate> {
   final NetworkInfo _networkInfo = getIt<NetworkInfo>();
 
+  /// Cloud backup is a Bubimo Plus feature. Free users never see the
+  /// screen: the paywall opens instead, and closing it without
+  /// subscribing leaves this route again. (Entry points such as
+  /// Settings also ask before navigating, so this is the safety net for
+  /// any other way in.)
+  bool _unlocked = false;
+
   bool _checking = true;
   bool _isRetrying = false;
   bool _hasInternet = false;
@@ -47,7 +56,23 @@ class _CloudBackupGateState extends State<CloudBackupGate> {
   @override
   void initState() {
     super.initState();
-    _check(initial: true);
+    if (PlusGate.isPlus) {
+      _unlocked = true;
+      _check(initial: true);
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askForPlus());
+    }
+  }
+
+  Future<void> _askForPlus() async {
+    final allowed = await PlusGate.require(context, PlusFeature.cloudBackup);
+    if (!mounted) return;
+    if (allowed) {
+      setState(() => _unlocked = true);
+      _check(initial: true);
+    } else {
+      Navigator.of(context).pop(false);
+    }
   }
 
   Future<void> _check({bool initial = false}) async {
@@ -71,6 +96,9 @@ class _CloudBackupGateState extends State<CloudBackupGate> {
 
   @override
   Widget build(BuildContext context) {
+    // Nothing of the real screen is shown until Plus is confirmed.
+    if (!_unlocked) return const Scaffold(body: SizedBox.shrink());
+
     if (_checking) {
       return const CheckingConnectivityPage();
     }

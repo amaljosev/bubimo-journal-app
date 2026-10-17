@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/di/injection.dart';
 import 'package:bubimo/features/plus/domain/entities/plus_feature.dart';
 import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
+import 'package:bubimo/features/plus/presentation/widgets/plus_feature_banner.dart';
 import 'package:bubimo/features/plus/presentation/widgets/plus_gate.dart';
 import '../widgets/backup_result_dialog.dart';
 import '../widgets/backup_section_card.dart';
@@ -94,6 +95,12 @@ class _ExportDiaryView extends StatelessWidget {
             children: [
               _InfoBanner(colorScheme: colorScheme, textTheme: textTheme),
               const SizedBox(height: 20),
+              const PlusFeatureBanner(
+                feature: PlusFeature.pdfExport,
+                message:
+                    'PDF export is a Bubimo Plus feature. '
+                    'Plain text export is always free.',
+              ),
               BackupSectionCard(
                 icon: Icons.picture_as_pdf_outlined,
                 title: 'PDF document',
