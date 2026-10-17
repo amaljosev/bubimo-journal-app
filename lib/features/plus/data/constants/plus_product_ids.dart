@@ -11,6 +11,7 @@ class PlusProductIds {
 
   /// Base plan IDs inside [subscription].
   static const String monthlyBasePlan = 'plus-monthly';
+  static const String quarterlyBasePlan = 'plus-quarterly';
   static const String yearlyBasePlan = 'plus-yearly';
 
   /// The one-time product (Monetize with Play > One-time products).

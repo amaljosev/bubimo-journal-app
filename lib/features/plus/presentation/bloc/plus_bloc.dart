@@ -52,6 +52,7 @@ class PlusBloc extends Bloc<PlusEvent, PlusState> {
     on<PlusProductsRequested>(_onProductsRequested);
     on<PlusPurchaseRequested>(_onPurchaseRequested);
     on<PlusRestoreRequested>(_onRestoreRequested);
+    on<PlusPurchaseReset>(_onPurchaseReset);
     on<_PlusOutcomeReceived>(_onOutcomeReceived);
 
     _outcomeSub = watchPlusPurchaseOutcomes().listen(
@@ -185,6 +186,15 @@ class PlusBloc extends Bloc<PlusEvent, PlusState> {
         ),
       ),
     );
+  }
+
+  void _onPurchaseReset(
+    PlusPurchaseReset event,
+    Emitter<PlusState> emit,
+  ) {
+    if (state.purchaseStatus == PlusPurchaseStatus.purchasing) {
+      emit(state.copyWith(purchaseStatus: PlusPurchaseStatus.idle));
+    }
   }
 
   void _onOutcomeReceived(

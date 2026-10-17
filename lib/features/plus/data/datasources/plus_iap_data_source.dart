@@ -94,6 +94,28 @@ class PlusIapDataSource {
   }
 
   Future<void> _handlePurchase(PurchaseDetails purchase) async {
+    // Cancelled and failed purchases arrive with an EMPTY productID —
+    // the plugin has no product to attach to a purchase that never
+    // happened (the user closed Google's sheet, or Play refused to
+    // open it). They MUST be handled before the "is this our
+    // product?" filter below, or they would be silently dropped and
+    // the paywall would spin forever after the sheet is dismissed.
+    if (purchase.status == PurchaseStatus.canceled) {
+      _results.add(const RawPurchaseCancelled());
+      return;
+    }
+    if (purchase.status == PurchaseStatus.error) {
+      if (purchase.pendingCompletePurchase) {
+        try {
+          await _iap.completePurchase(purchase);
+        } catch (e) {
+          debugPrint('PlusIapDataSource: complete failed: $e');
+        }
+      }
+      _results.add(RawPurchaseFailed(_friendlyError(purchase.error)));
+      return;
+    }
+
     if (!PlusProductIds.all.contains(purchase.productID)) {
       // Not ours — still has to be completed or Google keeps
       // redelivering it.
@@ -103,41 +125,52 @@ class PlusIapDataSource {
       return;
     }
 
-    switch (purchase.status) {
-      case PurchaseStatus.pending:
-        _results.add(const RawPurchasePending());
-      case PurchaseStatus.purchased:
-      case PurchaseStatus.restored:
-        // Acknowledge, or Google refunds the purchase after ~3 days.
-        // A failure here must not take Plus away from someone who
-        // paid — the next refresh retries the acknowledgement.
-        if (purchase.pendingCompletePurchase) {
-          try {
-            await _iap.completePurchase(purchase);
-          } catch (e) {
-            debugPrint('PlusIapDataSource: acknowledge failed: $e');
-          }
-        }
-        _results.add(RawPurchaseSucceeded(_tierFor(purchase.productID)));
-      case PurchaseStatus.canceled:
-        _results.add(const RawPurchaseCancelled());
-      case PurchaseStatus.error:
-        if (purchase.pendingCompletePurchase) {
-          await _iap.completePurchase(purchase);
-        }
-        _results.add(
-          RawPurchaseFailed(
-            purchase.error?.message ?? 'The purchase could not be completed.',
-          ),
-        );
+    if (purchase.status == PurchaseStatus.pending) {
+      _results.add(const RawPurchasePending());
+      return;
     }
+
+    // purchased / restored: acknowledge, or Google refunds the
+    // purchase after ~3 days. A failure here must not take Plus away
+    // from someone who paid — the next refresh retries the
+    // acknowledgement.
+    if (purchase.pendingCompletePurchase) {
+      try {
+        await _iap.completePurchase(purchase);
+      } catch (e) {
+        debugPrint('PlusIapDataSource: acknowledge failed: $e');
+      }
+    }
+    _results.add(RawPurchaseSucceeded(_tierFor(purchase.productID)));
+  }
+
+  /// The plugin's error message is just the Billing response code
+  /// (e.g. "BillingResponse.itemAlreadyOwned") — turn the ones a user
+  /// can actually run into into something readable.
+  String _friendlyError(IAPError? error) {
+    final raw = '${error?.message} ${error?.details}'.toLowerCase();
+    if (raw.contains('alreadyowned')) {
+      return 'You already own Bubimo Plus. Tap "Restore purchases" to '
+          'unlock it.';
+    }
+    if (raw.contains('unavailable') ||
+        raw.contains('disconnected') ||
+        raw.contains('timeout')) {
+      return 'Google Play is unavailable right now. Please try again '
+          'in a moment.';
+    }
+    if (raw.contains('network')) {
+      return 'No internet connection. Please check your connection and '
+          'try again.';
+    }
+    return 'The purchase could not be completed. Please try again.';
   }
 
   // ---------------------------------------------------------------
   // Products
   // ---------------------------------------------------------------
 
-  /// Fetches the three plans. For each subscription base plan, an
+  /// Fetches the four plans. For each subscription base plan, an
   /// offer with a free-trial first phase is preferred over the plain
   /// base plan — Google only returns offers the user is eligible for,
   /// so a returning subscriber automatically gets the plain price.
@@ -182,13 +215,27 @@ class PlusIapDataSource {
         continue;
       }
       final offer = offers[index];
+      debugPrint(
+        'PlusIapDataSource: Play offer -> basePlan=${offer.basePlanId}, '
+        'offer=${offer.offerId}, phases=${offer.pricingPhases.length}',
+      );
 
       final plan = switch (offer.basePlanId) {
         PlusProductIds.monthlyBasePlan => PlusPlan.monthly,
+        PlusProductIds.quarterlyBasePlan => PlusPlan.quarterly,
         PlusProductIds.yearlyBasePlan => PlusPlan.yearly,
         _ => null,
       };
-      if (plan == null) continue;
+      if (plan == null) {
+        debugPrint(
+          'PlusIapDataSource: ignoring unknown base plan '
+          '"${offer.basePlanId}" (expected one of '
+          '${PlusProductIds.monthlyBasePlan}, '
+          '${PlusProductIds.quarterlyBasePlan}, '
+          '${PlusProductIds.yearlyBasePlan})',
+        );
+        continue;
+      }
 
       final hasTrial = _hasFreeTrial(offer);
       final current = chosen[plan];
@@ -200,7 +247,11 @@ class PlusIapDataSource {
     _details.clear();
     final products = <PlusProduct>[];
 
-    for (final plan in const [PlusPlan.yearly, PlusPlan.monthly]) {
+    for (final plan in const [
+      PlusPlan.yearly,
+      PlusPlan.quarterly,
+      PlusPlan.monthly,
+    ]) {
       final pick = chosen[plan];
       if (pick == null) continue;
 

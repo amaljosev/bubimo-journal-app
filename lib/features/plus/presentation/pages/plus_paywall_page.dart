@@ -38,13 +38,22 @@ class _PlusPaywallPageState extends State<PlusPaywallPage> {
 
   PlusPlan _selected = PlusPlan.yearly;
   late final bool _openedAsFree;
+  late final PlusBloc _bloc;
 
   @override
   void initState() {
     super.initState();
-    final bloc = context.read<PlusBloc>();
-    _openedAsFree = !bloc.state.isPlus;
-    bloc.add(const PlusProductsRequested());
+    _bloc = context.read<PlusBloc>();
+    _openedAsFree = !_bloc.state.isPlus;
+    _bloc.add(const PlusProductsRequested());
+  }
+
+  @override
+  void dispose() {
+    // Safety net: never leave a stale "purchasing" spinner behind for
+    // the next time the paywall opens.
+    if (!_bloc.isClosed) _bloc.add(const PlusPurchaseReset());
+    super.dispose();
   }
 
   PlusProduct? _productFor(List<PlusProduct> products, PlusPlan plan) {
@@ -69,12 +78,14 @@ class _PlusPaywallPageState extends State<PlusPaywallPage> {
 
   String _planTitle(PlusPlan plan) => switch (plan) {
     PlusPlan.monthly => 'Monthly',
+    PlusPlan.quarterly => 'Quarterly',
     PlusPlan.yearly => 'Yearly',
     PlusPlan.lifetime => 'Lifetime',
   };
 
   String _priceLine(PlusProduct p) => switch (p.plan) {
     PlusPlan.monthly => '${p.formattedPrice} / month',
+    PlusPlan.quarterly => '${p.formattedPrice} / 3 months',
     PlusPlan.yearly => '${p.formattedPrice} / year',
     PlusPlan.lifetime => '${p.formattedPrice} one-time',
   };
@@ -89,6 +100,7 @@ class _PlusPaywallPageState extends State<PlusPaywallPage> {
     return switch (p.plan) {
       PlusPlan.lifetime => 'Buy Lifetime · ${p.formattedPrice}',
       PlusPlan.monthly => 'Subscribe · ${p.formattedPrice} / month',
+      PlusPlan.quarterly => 'Subscribe · ${p.formattedPrice} / 3 months',
       PlusPlan.yearly => 'Subscribe · ${p.formattedPrice} / year',
     };
   }
@@ -97,7 +109,11 @@ class _PlusPaywallPageState extends State<PlusPaywallPage> {
     if (p.plan == PlusPlan.lifetime) {
       return 'One-time payment. No renewals — yours for good.';
     }
-    final period = p.plan == PlusPlan.monthly ? 'month' : 'year';
+    final period = switch (p.plan) {
+      PlusPlan.monthly => 'month',
+      PlusPlan.quarterly => '3 months',
+      _ => 'year',
+    };
     if (p.hasFreeTrial) {
       return 'Free for the first ${p.freeTrialLabel?.isNotEmpty == true ? p.freeTrialLabel!.replaceAll('-', ' ') : 'trial period'}, '
           'then ${p.formattedPrice} / $period. Cancel anytime in Google Play '
@@ -207,11 +223,39 @@ class _PlusPaywallPageState extends State<PlusPaywallPage> {
         _productFor(products, _selected) ?? products.first;
     final savings = _yearlySavingsPercent(products);
 
+    // The first plan the user is eligible to try for free (the free
+    // trial may exist on only some plans — see Play Console offers).
+    PlusProduct? trialProduct;
+    for (final p in products) {
+      if (p.hasFreeTrial) {
+        trialProduct = p;
+        break;
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Dedicated trial button — shown when a plan has a free trial
+        // and it isn't the plan currently selected (if it is, the main
+        // button below already says "Start ... free trial").
+        if (trialProduct != null && selected.plan != trialProduct.plan) ...[
+          _TrialButton(
+            title: 'Start ${_trialPhrase(trialProduct)}',
+            subtitle:
+                '${_planTitle(trialProduct.plan)} plan · then '
+                '${_priceLine(trialProduct)} · cancel anytime',
+            onPressed: state.isBusy
+                ? null
+                : () => context.read<PlusBloc>().add(
+                    PlusPurchaseRequested(trialProduct!.plan),
+                  ),
+          ),
+          const SizedBox(height: 14),
+        ],
         for (final plan in const [
           PlusPlan.yearly,
+          PlusPlan.quarterly,
           PlusPlan.monthly,
           PlusPlan.lifetime,
         ])
@@ -379,6 +423,77 @@ class _MemberCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// A highlighted "try it free" button that starts the free trial
+/// directly on the plan that offers one, without changing which plan
+/// card is selected.
+class _TrialButton extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final VoidCallback? onPressed;
+
+  const _TrialButton({
+    required this.title,
+    required this.subtitle,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Opacity(
+      opacity: onPressed == null ? 0.5 : 1,
+      child: Material(
+        color: colorScheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onPressed,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colorScheme.primary, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.card_giftcard_rounded, color: colorScheme.primary),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: colorScheme.primary,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

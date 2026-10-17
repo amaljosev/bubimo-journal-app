@@ -11,7 +11,7 @@ import 'package:bubimo/features/settings/presentation/widgets/about_app_sheet.da
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import 'package:share_plus/share_plus.dart';
 import '../widgets/settings_list_item.dart';
 
 /// The Settings screen.
@@ -136,23 +136,46 @@ class SettingsPage extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             SettingsSection(
-              title: 'Spread the Word',
-              children: [
-                SettingsListItem(
-                  icon: Icons.share_outlined,
-                  label: 'Share App',
-                ),
-                SettingsListItem(
-                  icon: Icons.star_outline_rounded,
-                  label: 'Rate App',
-                ),
-              ],
-            ),
+  title: 'Spread the Word',
+  children: [
+    SettingsListItem(
+      icon: Icons.share_outlined,
+      label: 'Share App',
+      onTap: _shareApp,
+    ),
+    SettingsListItem(
+      icon: Icons.star_outline_rounded,
+      label: 'Rate App',
+      onTap: () => _rateApp(context),
+    ),
+  ],
+),
           ],
         ),
       ),
     );
   }
+  void _shareApp() {
+  SharePlus.instance.share(
+    ShareParams(
+      text: 'Check out Bubimo, a simple and private diary app: '
+          '${AppConstants.playStoreUrl}',
+    ),
+  );
+}
+
+void _rateApp(BuildContext context) {
+  InternetGate.run(
+    context,
+    title: 'Rate App',
+    message: 'You need an internet connection to open the Play Store.',
+    action: () => UrlLauncherHelper.launchUrlString(
+      context,
+      AppConstants.playStoreUrl,
+      LaunchMode.externalApplication,
+    ),
+  );
+}
 
   void showContactUsSheet(BuildContext context) {
     showModalBottomSheet(

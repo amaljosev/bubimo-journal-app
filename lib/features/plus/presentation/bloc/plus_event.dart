@@ -37,6 +37,14 @@ final class PlusRestoreRequested extends PlusEvent {
   const PlusRestoreRequested();
 }
 
+/// Safety net: the paywall closed while a purchase was still marked
+/// in progress. Puts the paywall back to idle so a stale spinner can
+/// never be waiting the next time it opens. (The real result of that
+/// purchase is still handled whenever it arrives.)
+final class PlusPurchaseReset extends PlusEvent {
+  const PlusPurchaseReset();
+}
+
 /// Internal: a result arrived on the repository's purchase stream.
 final class _PlusOutcomeReceived extends PlusEvent {
   final Either<Failure, PlusPurchaseOutcome> outcome;
