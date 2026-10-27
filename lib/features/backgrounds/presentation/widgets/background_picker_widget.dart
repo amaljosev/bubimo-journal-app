@@ -1,40 +1,24 @@
 // lib/features/backgrounds/presentation/widgets/background_picker_widget.dart
 
-import 'dart:developer' as developer;
 import 'dart:io';
 
-import 'package:bubimo/core/error/exceptions.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/error/exceptions.dart';
 import '../../../../core/storage/media_storage_service.dart';
 import '../bloc/background_picker/background_picker_bloc.dart';
 import '../bloc/background_picker/background_picker_event.dart';
 import '../bloc/background_picker/background_picker_state.dart';
 
-/// One shared loading visual for the picker's single full-tab loading
-/// moment (no persisted seed yet, first fetch still in flight) — kept
-/// as one constant so there's a single common loading look rather than
-/// several different-looking ones.
-const Widget _loadingIndicator = Center(
-  child: SizedBox(
-    width: 20,
-    height: 20,
-    child: CircularProgressIndicator(strokeWidth: 2),
-  ),
-);
-
-/// How close to the bottom (in logical pixels) the grid needs to be
-/// scrolled before the next page of Supabase presets is requested.
-const double _loadMoreThreshold = 300;
-
 /// Where a selected background came from — determines which of
 /// `DiaryEntry`'s two background fields the caller should set.
 enum BackgroundSourceType {
-  /// A Supabase-fetched preset, already downloaded and cached locally
-  /// by the time this is returned. Caller should set `bgLocalPath`.
+  /// A Supabase preset, already downloaded to a local file by the time
+  /// this is returned. Caller should set `bgLocalPath`.
   presetRemote,
 
   /// Picked from the device gallery. Caller should set
@@ -42,35 +26,28 @@ enum BackgroundSourceType {
   gallery,
 
   /// The user explicitly cleared the background — `path` is null.
-  /// Caller should unset both `bgLocalPath` and
-  /// `bgGalleryImagePath`.
+  /// Caller should unset both `bgLocalPath` and `bgGalleryImagePath`.
   none,
 }
 
 class SelectedBackground {
   final BackgroundSourceType type;
 
-  /// Null when [type] is [BackgroundSourceType.none]; always
-  /// non-null for the other two types.
+  /// Null when [type] is [BackgroundSourceType.none]; always non-null
+  /// for the other two types.
   final String? path;
 
   const SelectedBackground({required this.type, this.path});
 }
 
-/// Lets the user choose a background: Supabase-fetched presets (if
-/// online, or from the offline seed if not), their own gallery photo,
-/// or clearing the background entirely. Returns the selection via
-/// [onSelected] — this widget doesn't touch the diary entry itself,
-/// the caller (diary_form_page) applies it based on
-/// [SelectedBackground.type].
+/// Lets the user choose a background: a Supabase preset, a gallery
+/// photo, or none. Returns the choice via [onSelected]; the caller
+/// (diary_form_page) applies it to the entry.
 class BackgroundPickerWidget extends StatefulWidget {
   final ValueChanged<SelectedBackground> onSelected;
 
-  /// The diary entry's currently-active preset path, if its
-  /// background currently comes from a preset — so the matching tile
-  /// (or the Clear tile, if this is null) opens already marked as
-  /// selected instead of always defaulting to Clear regardless of
-  /// what's actually set.
+  /// The entry's current preset file path, if its background is a
+  /// preset, so the matching tile (or "None") opens highlighted.
   final String? currentPresetPath;
 
   const BackgroundPickerWidget({
@@ -80,8 +57,7 @@ class BackgroundPickerWidget extends StatefulWidget {
   });
 
   @override
-  State<BackgroundPickerWidget> createState() =>
-      _BackgroundPickerWidgetState();
+  State<BackgroundPickerWidget> createState() => _BackgroundPickerWidgetState();
 }
 
 class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
@@ -137,47 +113,75 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) =>
-          getIt<BackgroundPickerBloc>()..add(const LoadBackgrounds()),
-      child: SizedBox(
-        height: 420,
-        child: Column(
-          children: [
-            TabBar(
-              controller: _tabController,
-              tabs: const [
-                Tab(text: 'Presets'),
-                Tab(text: 'Gallery'),
-              ],
-            ),
-            Expanded(
-              // AutomaticKeepAliveClientMixin on each tab (below) needs
-              // TabBarView to not tear the tab down when it scrolls
-              // offscreen — that disposal is what forces a rebuild (and
-              // re-decode of every already-local image) on every switch
-              // back to a previously-viewed tab.
-              child: TabBarView(
+          getIt<BackgroundPickerBloc>()..add(const BackgroundPickerStarted()),
+      // Hands the downloaded preset to the caller, or reports a failed
+      // download. Lives above the tabs so it works regardless of which
+      // tab is visible.
+      child: BlocListener<BackgroundPickerBloc, BackgroundPickerState>(
+        listenWhen: (prev, curr) =>
+            (curr.downloaded != null && prev.downloaded != curr.downloaded) ||
+            (curr.downloadFailed && !prev.downloadFailed),
+        listener: (context, state) {
+          final downloaded = state.downloaded;
+          if (downloaded != null) {
+            widget.onSelected(
+              SelectedBackground(
+                type: BackgroundSourceType.presetRemote,
+                path: downloaded.localPath,
+              ),
+            );
+          } else if (state.downloadFailed) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Couldn't download this background. Try again."),
+              ),
+            );
+          }
+        },
+        child: SizedBox(
+          height: 420,
+          child: Column(
+            children: [
+              TabBar(
                 controller: _tabController,
-                children: [
-                  _PresetsTab(
-                    onSelected: widget.onSelected,
-                    currentPresetPath: widget.currentPresetPath,
-                  ),
-                  _GalleryTab(onPickPressed: _pickFromGallery),
+                tabs: const [
+                  Tab(text: 'Presets'),
+                  Tab(text: 'Gallery'),
                 ],
               ),
-            ),
-          ],
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _PresetsTab(
+                      currentPresetPath: widget.currentPresetPath,
+                      onClear: () => widget.onSelected(
+                        const SelectedBackground(
+                          type: BackgroundSourceType.none,
+                        ),
+                      ),
+                    ),
+                    _GalleryTab(onPickPressed: _pickFromGallery),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _PresetsTab extends StatefulWidget {
-  final ValueChanged<SelectedBackground> onSelected;
-  final String? currentPresetPath;
+// ---------------------------------------------------------------------------
+// Presets tab
+// ---------------------------------------------------------------------------
 
-  const _PresetsTab({required this.onSelected, this.currentPresetPath});
+class _PresetsTab extends StatefulWidget {
+  final String? currentPresetPath;
+  final VoidCallback onClear;
+
+  const _PresetsTab({this.currentPresetPath, required this.onClear});
 
   @override
   State<_PresetsTab> createState() => _PresetsTabState();
@@ -185,59 +189,25 @@ class _PresetsTab extends StatefulWidget {
 
 class _PresetsTabState extends State<_PresetsTab>
     with AutomaticKeepAliveClientMixin {
-  final ScrollController _scrollController = ScrollController();
-
-  /// Null means the "Clear" tile is the current selection. Non-null is
-  /// the selected preset's local cached path. Initialized from
-  /// [_PresetsTab.currentPresetPath] (not always null) so reopening
-  /// the picker highlights whatever's actually set right now, rather
-  /// than always defaulting back to Clear regardless of position.
-  String? _selectedPath;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedPath = widget.currentPresetPath;
-    _scrollController.addListener(_onScroll);
-  }
-
-  @override
-  void dispose() {
-    _scrollController
-      ..removeListener(_onScroll)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
-    if (position.pixels < position.maxScrollExtent - _loadMoreThreshold) {
-      return;
-    }
-
-    // Belt-and-suspenders: check the bloc's latest state here too
-    // (not just inside the bloc's own handler) so a burst of scroll
-    // callbacks near the threshold doesn't queue up redundant events.
-    final bloc = context.read<BackgroundPickerBloc>();
-    if (bloc.state.isLoadingMoreRemote || !bloc.state.hasMoreRemote) return;
-    bloc.add(const LoadMoreBackgrounds());
-  }
-
-  void _handleSelect(String? path) {
-    setState(() => _selectedPath = path);
-    widget.onSelected(
-      path == null
-          ? const SelectedBackground(type: BackgroundSourceType.none)
-          : SelectedBackground(
-              type: BackgroundSourceType.presetRemote,
-              path: path,
-            ),
-    );
-  }
-
   @override
   bool get wantKeepAlive => true;
+
+  /// File name of the entry's current preset (e.g. `3.webp`), used to
+  /// mark the matching tile. Null means "None" is the current choice.
+  late final String? _currentFileName = _fileNameOf(widget.currentPresetPath);
+
+  static String? _fileNameOf(String? pathOrUrl) {
+    if (pathOrUrl == null || pathOrUrl.isEmpty) return null;
+    return pathOrUrl.split(RegExp(r'[\\/]')).last;
+  }
+
+  void _select(String? url) {
+    if (url == null) {
+      widget.onClear();
+      return;
+    }
+    context.read<BackgroundPickerBloc>().add(BackgroundPresetSelected(url));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -245,122 +215,115 @@ class _PresetsTabState extends State<_PresetsTab>
 
     return BlocBuilder<BackgroundPickerBloc, BackgroundPickerState>(
       builder: (context, state) {
-        if (!state.remoteFetchAttempted) {
-          return _loadingIndicator;
-        }
-
-        if (state.remoteFetchFailed) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    "Couldn't load backgrounds — check your connection.",
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => context
-                        .read<BackgroundPickerBloc>()
-                        .add(const LoadBackgrounds()),
-                    child: const Text('Try again'),
-                  ),
-                ],
+        switch (state.status) {
+          case BackgroundPickerStatus.loading:
+            return const Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-            ),
-          );
-        }
+            );
 
-        // Always shown once we get here — the Clear tile makes sure
-        // there's a meaningful first item even when there happen to
-        // be zero downloaded presets, and this now covers both "fully
-        // online" and "offline, showing the persisted seed" alike.
-        return _BackgroundGrid(
-          paths: state.remotePresets,
-          selectedPath: _selectedPath,
-          onSelect: _handleSelect,
-          scrollController: _scrollController,
-          isLoadingMore: state.isLoadingMoreRemote,
-        );
+          case BackgroundPickerStatus.failure:
+            return _ErrorView(
+              onRetry: () => context.read<BackgroundPickerBloc>().add(
+                const BackgroundPickerRetried(),
+              ),
+            );
+
+          case BackgroundPickerStatus.ready:
+            return Column(
+              children: [
+                if (state.isRefreshing)
+                  const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: GridView.builder(
+                    padding: const EdgeInsets.all(12),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                          childAspectRatio: 0.8,
+                        ),
+                    // Tiles are built lazily, so thumbnails only load
+                    // as they scroll into view.
+                    itemCount: state.urls.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return _SelectableTile(
+                          isSelected: _currentFileName == null,
+                          onTap: state.downloadingUrl == null
+                              ? () => _select(null)
+                              : null,
+                          child: const _NoneTile(),
+                        );
+                      }
+
+                      final url = state.urls[index - 1];
+                      final isDownloading = state.downloadingUrl == url;
+                      return _SelectableTile(
+                        key: ValueKey(url),
+                        isSelected:
+                            _currentFileName != null &&
+                            _currentFileName == _fileNameOf(url),
+                        onTap: state.downloadingUrl == null
+                            ? () => _select(url)
+                            : null,
+                        child: _PresetThumbnail(
+                          url: url,
+                          isDownloading: isDownloading,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+        }
       },
     );
   }
 }
 
-class _BackgroundGrid extends StatelessWidget {
-  final List<String> paths;
-  final String? selectedPath;
-  final ValueChanged<String?> onSelect;
-  final ScrollController scrollController;
-  final bool isLoadingMore;
+class _ErrorView extends StatelessWidget {
+  final VoidCallback onRetry;
 
-  const _BackgroundGrid({
-    required this.paths,
-    required this.selectedPath,
-    required this.onSelect,
-    required this.scrollController,
-    required this.isLoadingMore,
-  });
+  const _ErrorView({required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      controller: scrollController,
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.all(12),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 0.8,
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "Couldn't load backgrounds — check your connection.",
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                if (index == 0) {
-                  return _SelectableTile(
-                    isSelected: selectedPath == null,
-                    onTap: () => onSelect(null),
-                    child: const _ClearTile(),
-                  ); 
-                }
-                final path = paths[index - 1];
-                return _SelectableTile(
-                  isSelected: selectedPath == path,
-                  onTap: () => onSelect(path),
-                  child: _PresetTile(path: path),
-                );
-              },
-              childCount: paths.length + 1,
-            ),
-          ),
+            const SizedBox(height: 8),
+            TextButton(onPressed: onRetry, child: const Text('Try again')),
+          ],
         ),
-        if (isLoadingMore)
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: _loadingIndicator,
-            ),
-          ),
-      ],
+      ),
     );
   }
 }
 
-/// Wraps a tile with the shared "this is the current selection" look
-/// — a colored ring plus a small checkmark badge — so the Clear tile
-/// and every image tile show it identically, and it always tracks
-/// whichever tile is actually selected rather than a fixed position.
+/// Shared "current selection" look: a colored ring plus a checkmark.
 class _SelectableTile extends StatelessWidget {
   final bool isSelected;
-  final VoidCallback onTap;
+
+  /// Null disables the tile (e.g. while another preset is downloading).
+  final VoidCallback? onTap;
   final Widget child;
 
   const _SelectableTile({
+    super.key,
     required this.isSelected,
     required this.onTap,
     required this.child,
@@ -407,10 +370,9 @@ class _SelectableTile extends StatelessWidget {
   }
 }
 
-/// The always-first grid item: explicitly clears the background
-/// rather than picking an image.
-class _ClearTile extends StatelessWidget {
-  const _ClearTile();
+/// The always-first tile: clears the background.
+class _NoneTile extends StatelessWidget {
+  const _NoneTile();
 
   @override
   Widget build(BuildContext context) {
@@ -428,8 +390,8 @@ class _ClearTile extends StatelessWidget {
           Text(
             'None',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -437,33 +399,61 @@ class _ClearTile extends StatelessWidget {
   }
 }
 
-class _PresetTile extends StatelessWidget {
-  final String path;
+/// A preset thumbnail streamed from its public URL. The image library
+/// caches it on disk, so it is only fetched once. The full file is not
+/// stored in the app until the user taps the tile.
+class _PresetThumbnail extends StatelessWidget {
+  final String url;
+  final bool isDownloading;
 
-  const _PresetTile({required this.path});
+  const _PresetThumbnail({required this.url, required this.isDownloading});
 
   @override
   Widget build(BuildContext context) {
-    // `path` is a durable LOCAL file path, not a URL — the bloc only
-    // ever adds an entry to `remoteByUrl` once that URL is actually
-    // downloaded and cached (whether from the persisted offline seed
-    // or a later page), so by the time the grid renders it's already
-    // on disk. Image.file, not a network image loader.
-    return Image.file(
-      File(path),
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) {
-        developer.log(
-          'Failed to render cached background preset: $path',
-          name: 'BackgroundPickerWidget',
-          error: error,
-          stackTrace: stackTrace,
-        );
-        return const Icon(Icons.broken_image, color: Colors.grey);
-      },
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          // Tiles are ~80dp wide: decode at thumbnail size, not at the
+          // wallpaper's full resolution.
+          memCacheWidth: 300,
+          fadeInDuration: const Duration(milliseconds: 150),
+          placeholder: (_, _) =>
+              ColoredBox(color: colorScheme.surfaceContainerHighest),
+          errorWidget: (_, _, _) => ColoredBox(
+            color: colorScheme.surfaceContainerHighest,
+            child: Icon(
+              Icons.broken_image_outlined,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        if (isDownloading)
+          ColoredBox(
+            color: Colors.black45,
+            child: const Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Gallery tab
+// ---------------------------------------------------------------------------
 
 class _GalleryTab extends StatefulWidget {
   final VoidCallback onPickPressed;
@@ -481,7 +471,7 @@ class _GalleryTabState extends State<_GalleryTab>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // required by AutomaticKeepAliveClientMixin
+    super.build(context);
 
     return Center(
       child: FilledButton.icon(
@@ -494,11 +484,8 @@ class _GalleryTabState extends State<_GalleryTab>
 }
 
 /// Shows [BackgroundPickerWidget] in a modal bottom sheet. Returns the
-/// selection, or null if dismissed without choosing.
-///
-/// Pass [currentPresetPath] (the diary entry's current `bgLocalPath`,
-/// if it has one) so the picker opens with the right tile already
-/// marked as selected instead of always defaulting to Clear.
+/// selection, or null if dismissed without choosing. The caller checks
+/// connectivity before calling this (see diary_form_page).
 Future<SelectedBackground?> showBackgroundPickerSheet(
   BuildContext context, {
   String? currentPresetPath,

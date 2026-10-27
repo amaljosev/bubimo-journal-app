@@ -46,13 +46,45 @@ class CachedStickerSeed {
   }
 }
 
-/// Persists metadata for the offline sticker seed — unlike
-/// [BackgroundPresetCacheDataSource]'s flat "first N" cap, stickers are
-/// organized into categories (Supabase Storage subfolders), so the
-/// natural seed unit here is "every sticker in the first category",
-/// not an arbitrary item count. See [StickerPickerBloc]'s
-/// `_seedCategoryCap` for the one safety limit that still applies (in
-/// case that first category turns out to be huge).
+/// The persisted *catalog*: category -> ordered sticker URLs, as returned
+/// by the (expensive) Supabase Storage listing, plus when it was fetched.
+///
+/// This is what removes the repeated API calls. The listing costs one
+/// `list()` call for the root folder plus at least one more per category
+/// (more with pagination), so it must not run every time the sheet opens.
+/// Instead the catalog is cached in memory + on disk and only re-fetched
+/// once it is older than a TTL (see `_manifestTtl` in
+/// `StickerPickerBloc`).
+class CachedStickerManifest {
+  final Map<String, List<String>> categoryUrls;
+  final DateTime fetchedAt;
+
+  const CachedStickerManifest({
+    required this.categoryUrls,
+    required this.fetchedAt,
+  });
+
+  bool isFresh(Duration ttl) => DateTime.now().difference(fetchedAt) < ttl;
+
+  Map<String, dynamic> toJson() => {
+        'fetchedAt': fetchedAt.toIso8601String(),
+        'categories': categoryUrls,
+      };
+
+  factory CachedStickerManifest.fromJson(Map<String, dynamic> json) {
+    final raw = json['categories'] as Map<String, dynamic>;
+    return CachedStickerManifest(
+      fetchedAt: DateTime.parse(json['fetchedAt'] as String),
+      categoryUrls: {
+        for (final entry in raw.entries)
+          entry.key: (entry.value as List).map((e) => e as String).toList(),
+      },
+    );
+  }
+}
+
+/// Persists metadata for the offline sticker seed and the sticker
+/// catalog (manifest).
 abstract class StickerCacheDataSource {
   /// Never throws — an unreadable or corrupted cache is treated as
   /// "nothing cached yet" so a bad file can never break the picker.
@@ -61,26 +93,39 @@ abstract class StickerCacheDataSource {
 
   /// Replaces the persisted seed with [seed].
   Future<void> saveSeed(CachedStickerSeed seed);
+
+  /// Never throws. Returns the cached catalog (memory first, then disk),
+  /// or null if none exists / it is unreadable.
+  Future<CachedStickerManifest?> getCachedManifest();
+
+  /// Replaces the cached catalog. Empty maps are ignored on purpose: a
+  /// misconfigured RLS policy makes Supabase Storage return `[]` instead
+  /// of an error, and caching that would hide stickers until the TTL
+  /// expired.
+  Future<void> saveManifest(Map<String, List<String>> categoryUrls);
 }
 
-/// Default [StickerCacheDataSource]: one small JSON file in the app's
-/// support directory — same approach as
-/// `JsonFileBackgroundPresetCacheDataSource`, for consistency between
-/// the two pickers. If you've since moved the background preset cache
-/// onto `AppDatabase` (or another local database), do the same here
-/// instead; nothing outside this file needs to change either way.
+/// Default [StickerCacheDataSource]: small JSON files in the app's
+/// support directory, plus a process-wide in-memory copy of the manifest
+/// so re-opening the sheet within one app session never touches the disk
+/// or the network.
 class JsonFileStickerCacheDataSource implements StickerCacheDataSource {
   static const String _fileName = 'sticker_cache.json';
+  static const String _manifestFileName = 'sticker_manifest.json';
 
-  Future<File> _cacheFile() async {
+  /// Static on purpose: it survives even if the DI container creates a
+  /// new instance of this class each time (factory registration).
+  static CachedStickerManifest? _memoryManifest;
+
+  Future<File> _file(String name) async {
     final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/$_fileName');
+    return File('${dir.path}/$name');
   }
 
   @override
   Future<CachedStickerSeed?> getCachedSeed() async {
     try {
-      final file = await _cacheFile();
+      final file = await _file(_fileName);
       if (!await file.exists()) return null;
 
       final raw = await file.readAsString();
@@ -101,7 +146,55 @@ class JsonFileStickerCacheDataSource implements StickerCacheDataSource {
 
   @override
   Future<void> saveSeed(CachedStickerSeed seed) async {
-    final file = await _cacheFile();
-    await file.writeAsString(jsonEncode(seed.toJson()));
+    final file = await _file(_fileName);
+    await file.writeAsString(jsonEncode(seed.toJson()), flush: true);
+  }
+
+  @override
+  Future<CachedStickerManifest?> getCachedManifest() async {
+    final inMemory = _memoryManifest;
+    if (inMemory != null) return inMemory;
+
+    try {
+      final file = await _file(_manifestFileName);
+      if (!await file.exists()) return null;
+
+      final raw = await file.readAsString();
+      if (raw.trim().isEmpty) return null;
+
+      final manifest = CachedStickerManifest.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
+      _memoryManifest = manifest;
+      return manifest;
+    } catch (error, stackTrace) {
+      developer.log(
+        'Sticker manifest unreadable — treating as empty',
+        name: 'JsonFileStickerCacheDataSource',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
+  }
+
+  @override
+  Future<void> saveManifest(Map<String, List<String>> categoryUrls) async {
+    if (categoryUrls.isEmpty) return;
+
+    final manifest = CachedStickerManifest(
+      categoryUrls: categoryUrls,
+      fetchedAt: DateTime.now(),
+    );
+    // Memory first: the very next sheet open benefits even if the disk
+    // write below is slow or fails.
+    _memoryManifest = manifest;
+
+    // Write to a temp file then rename, so a crash mid-write can never
+    // leave a half-written (corrupt) manifest behind.
+    final file = await _file(_manifestFileName);
+    final tmp = File('${file.path}.tmp');
+    await tmp.writeAsString(jsonEncode(manifest.toJson()), flush: true);
+    await tmp.rename(file.path);
   }
 }

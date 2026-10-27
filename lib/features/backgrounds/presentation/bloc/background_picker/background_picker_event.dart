@@ -9,18 +9,26 @@ sealed class BackgroundPickerEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-/// Loads local bundled presets immediately, lists the available
-/// Supabase presets, then downloads and caches the first page of
-/// them. Fired once when the background picker opens (and again by
-/// the "Try again" retry action, or when connectivity comes back).
-final class LoadBackgrounds extends BackgroundPickerEvent {
-  const LoadBackgrounds();
+/// Fired once when the picker opens. Shows the cached preset list
+/// instantly if there is one, and refreshes it in the background when
+/// it is stale (or loads it with a spinner when there is none).
+final class BackgroundPickerStarted extends BackgroundPickerEvent {
+  const BackgroundPickerStarted();
 }
 
-/// Downloads and caches the next page of already-listed Supabase
-/// presets. Fired when the grid is scrolled near its end. A no-op if
-/// a page is already in flight, the previous attempt failed
-/// outright, or there's nothing left to load.
-final class LoadMoreBackgrounds extends BackgroundPickerEvent {
-  const LoadMoreBackgrounds();
+/// Fired by the "Try again" button after a failed first load.
+final class BackgroundPickerRetried extends BackgroundPickerEvent {
+  const BackgroundPickerRetried();
+}
+
+/// Fired when the user taps a preset: downloads it to a durable local
+/// file (instant if already downloaded) and reports the path through
+/// `BackgroundPickerState.downloaded`.
+final class BackgroundPresetSelected extends BackgroundPickerEvent {
+  final String url;
+
+  const BackgroundPresetSelected(this.url);
+
+  @override
+  List<Object?> get props => [url];
 }

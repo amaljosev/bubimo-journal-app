@@ -12,7 +12,6 @@ import 'package:bubimo/features/plus/domain/usecases/refresh_plus_status.dart';
 import 'package:bubimo/features/plus/domain/usecases/start_plus_purchase.dart';
 import 'package:bubimo/features/plus/domain/usecases/watch_plus_purchase_outcomes.dart';
 import 'package:bubimo/features/plus/presentation/bloc/plus_bloc.dart';
-import 'package:bubimo/features/backgrounds/data/datasources/background_preset_cache_data_source.dart';
 import 'package:bubimo/features/backup/presentation/bloc/backup/backup_bloc.dart';
 import 'package:bubimo/features/backup/presentation/bloc/export/bloc/export_bloc.dart';
 
@@ -93,7 +92,10 @@ import '../../features/profile/domain/usecases/update_user_profile.dart';
 import '../../features/profile/presentation/cubit/profile_cubit.dart';
 
 // backgrounds
+import '../../features/backgrounds/data/datasources/background_cache_data_source.dart';
 import '../../features/backgrounds/data/datasources/supabase_background_data_source.dart';
+import '../../features/backgrounds/data/repositories/background_repository_impl.dart';
+import '../../features/backgrounds/domain/repositories/background_repository.dart';
 import '../../features/backgrounds/presentation/bloc/background_picker/background_picker_bloc.dart';
 import '../services/supabase_storage_asset_service.dart';
 
@@ -411,6 +413,14 @@ Future<void> configureDependencies() async {
 
   // --- backgrounds ---
   // SupabaseClient is registered above (diary_entry stickers section).
+  // The cache, data source and repository are lazy singletons on
+  // purpose: the repository's in-flight request tracking and the cache's
+  // in-memory copy must be shared by every picker open and by the
+  // prefetch fired from the diary form. Only the bloc is a factory —
+  // a fresh one per sheet open.
+  getIt.registerLazySingleton<BackgroundCacheDataSource>(
+    () => JsonFileBackgroundCacheDataSource(),
+  );
   getIt.registerLazySingleton(
     () => SupabaseStorageAssetService(
       getIt<SupabaseClient>(),
@@ -418,17 +428,20 @@ Future<void> configureDependencies() async {
     ),
   );
   getIt.registerLazySingleton(
-    () => SupabaseBackgroundDataSource(getIt<SupabaseStorageAssetService>()),
+    () => SupabaseBackgroundDataSource(
+      getIt<SupabaseClient>(),
+      getIt<SupabaseStorageAssetService>(),
+    ),
   );
-  getIt.registerLazySingleton<BackgroundPresetCacheDataSource>(
-  () => JsonFileBackgroundPresetCacheDataSource(),
-);
-getIt.registerFactory<BackgroundPickerBloc>(
-  () => BackgroundPickerBloc(
-    remoteDataSource: getIt<SupabaseBackgroundDataSource>(),
-    cacheDataSource: getIt<BackgroundPresetCacheDataSource>(),
-  ),
-);
+  getIt.registerLazySingleton<BackgroundRepository>(
+    () => BackgroundRepositoryImpl(
+      remote: getIt<SupabaseBackgroundDataSource>(),
+      cache: getIt<BackgroundCacheDataSource>(),
+    ),
+  );
+  getIt.registerFactory(
+    () => BackgroundPickerBloc(repository: getIt<BackgroundRepository>()),
+  );
 
   // --- cloud_backup ---
   // GoogleAuthDataSource is a lazy singleton — it tracks the current

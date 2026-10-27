@@ -85,7 +85,7 @@ flutter_launcher_icons:
   min_sdk_android: 21
 
 # For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
+# following page: https://dart.dexv/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:

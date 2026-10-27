@@ -146,7 +146,7 @@ class DiaryFormState extends Equatable {
     this.bgImagePath,
     this.bgGalleryImagePath,
     this.bgLocalPath,
-    this.bgOverlayOpacity = 0.50,
+    this.bgOverlayOpacity = 0.30,
     this.bgOverlayColor,
     this.errorMessage,
   });

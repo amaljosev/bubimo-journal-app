@@ -1,6 +1,7 @@
 // lib/features/diary_entry/presentation/pages/diary_form_page.dart
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:bubimo/features/ads/presentation/pages/daily_ad_notice_page.dart';
 import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
@@ -24,10 +25,12 @@ import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/network/network_info.dart';
 import '../../../../core/theme/font/safe_font_service.dart';
 import '../../../../core/utils/id_generator.dart';
 import '../../../../core/widgets/error_screen.dart';
 import '../../../../core/widgets/loading_screen.dart';
+import '../../../backgrounds/domain/repositories/background_repository.dart';
 import '../../../backgrounds/presentation/widgets/background_picker_widget.dart';
 import '../../domain/entities/mood.dart';
 import '../../domain/entities/overlay_image.dart';
@@ -242,6 +245,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     // the user taps Save. No-ops if ads are off or one was already
     // shown today.
     unawaited(getIt<InterstitialAdService>().preload());
+    // Warm the background preset list so the picker opens instantly.
+    // No-ops if the cached list is still fresh; never throws.
+    unawaited(getIt<BackgroundRepository>().prefetch());
   }
 
   /// Runs after the entry has been saved: shows the full-screen ad if
@@ -492,6 +498,94 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     return viewportOriginInContentSpace & viewportBox.size;
   }
 
+  /// Real internet check (`NetworkInfo`, backed by
+  /// `internet_connection_checker_plus`) done BEFORE a Supabase-backed
+  /// sheet opens, so an offline user gets a SnackBar instead of a sheet
+  /// that opens and then immediately closes. Returns false (after
+  /// showing the SnackBar) when offline. If the check itself fails, the
+  /// sheet is allowed to open and handles errors itself.
+  Future<bool> _ensureOnline() async {
+    bool online;
+    try {
+      online = await getIt<NetworkInfo>().isConnected;
+    } catch (_) {
+      return true;
+    }
+    if (online) return true;
+    if (mounted) _showNoInternetSnackBar();
+    return false;
+  }
+
+  /// Floating, rounded, theme-matched "no internet" message. Lifted
+  /// above the bottom toolbar so it never hides behind it.
+  void _showNoInternetSnackBar() {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          elevation: 4,
+          backgroundColor: colors.secondaryContainer,
+          margin: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            DiaryBottomToolbarState.totalHeight + 12,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          duration: const Duration(seconds: 3),
+          content: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: colors.onSecondaryContainer.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.wifi_off_rounded,
+                  size: 20,
+                  color: colors.onSecondaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No internet connection',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: colors.onSecondaryContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Connect to the internet and try again.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.onSecondaryContainer.withValues(
+                          alpha: 0.8,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+  }
+
   /// Opens the sticker picker sheet. Unlike gallery overlay photos
   /// (already a local file the moment they're picked), a sticker must
   /// be downloaded from Supabase first — so that download happens here,
@@ -513,6 +607,9 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     // Dismiss keyboard before showing sticker picker
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
+
+    if (!await _ensureOnline()) return;
+    if (!context.mounted) return;
 
     final url = await showStickerPickerSheet(context);
     if (url == null || !context.mounted) return;
@@ -999,12 +1096,26 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     FocusScope.of(context).unfocus();
     _toolbarKey.currentState?.closeActivePanel();
 
+    if (!await _ensureOnline()) return;
+    if (!context.mounted) return;
+
     final selection = await showBackgroundPickerSheet(context);
     if (selection == null) return;
 
     switch (selection.type) {
       case BackgroundSourceType.presetRemote:
-        _bloc.add(DiaryFormBackgroundChanged(bgLocalPath: selection.path));
+        final path = selection.path;
+        final exists = path != null && File(path).existsSync();
+        debugPrint('[Background] preset path=$path exists=$exists');
+        if (!exists) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Background file was not saved.')),
+            );
+          }
+          return;
+        }
+        _bloc.add(DiaryFormBackgroundChanged(bgLocalPath: path));
       case BackgroundSourceType.gallery:
         _bloc.add(
           DiaryFormBackgroundChanged(bgGalleryImagePath: selection.path),
