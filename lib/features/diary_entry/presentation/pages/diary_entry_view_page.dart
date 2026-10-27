@@ -9,8 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:go_router/go_router.dart';
-
 import '../../../../core/di/injection.dart';
+import '../../../../core/services/review_prompt_service.dart';
 import '../../../../core/theme/font/safe_font_service.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../../core/widgets/error_screen.dart';
@@ -36,6 +36,10 @@ import '../widgets/diary_bottom_toolbar.dart' show DividerEmbedBuilder;
 /// Pops with `true` if anything changed (favorite toggled, entry
 /// edited, or entry deleted) so Home knows to refresh its list; pops
 /// with `false` if the user just navigated back with no changes.
+///
+/// Also asks for an in-app review once an entry has loaded, via
+/// [ReviewPromptService], which decides whether it's actually time to
+/// show the dialog (view count, once per day, capped attempts).
 class DiaryEntryViewPage extends StatefulWidget {
   final String entryId;
 
@@ -49,6 +53,7 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
   final GetDiaryEntryById _getDiaryEntryById = getIt<GetDiaryEntryById>();
   final UpdateDiaryEntry _updateDiaryEntry = getIt<UpdateDiaryEntry>();
   final DeleteDiaryEntry _deleteDiaryEntry = getIt<DeleteDiaryEntry>();
+  final ReviewPromptService _reviewPromptService = getIt<ReviewPromptService>();
 
   DiaryEntry? _entry;
   quill.QuillController? _viewController;
@@ -57,6 +62,10 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
   bool _isTogglingFavorite = false;
   bool _isDeleting = false;
   bool _hasChanges = false;
+
+  /// True once the review check has run for this visit, so reloading
+  /// the entry after an edit doesn't trigger it a second time.
+  bool _reviewChecked = false;
 
   @override
   void initState() {
@@ -132,6 +141,22 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
         );
       }),
     );
+
+    // Ask for a review only after the entry has actually loaded, and
+    // only once per visit (not again after an edit-triggered reload).
+    if (_entry != null && !_reviewChecked) {
+      _reviewChecked = true;
+      _requestReviewSoon();
+    }
+  }
+
+  /// Small delay so the dialog doesn't pop over the loading screen or
+  /// the page transition. [ReviewPromptService] decides whether the
+  /// dialog is actually shown.
+  Future<void> _requestReviewSoon() async {
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted || _isDeleting) return;
+    await _reviewPromptService.onEntryOpened();
   }
 
   Future<void> _toggleFavorite() async {

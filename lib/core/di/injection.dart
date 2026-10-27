@@ -1,5 +1,6 @@
 // lib/core/di/injection.dart
 
+import 'package:bubimo/core/services/review_prompt_service.dart';
 import 'package:bubimo/features/ads/data/services/ads_preference_service.dart';
 import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
 import 'package:bubimo/features/plus/data/datasources/plus_iap_data_source.dart';
@@ -692,4 +693,5 @@ Future<void> configureDependencies() async {
       watchPlusPurchaseOutcomes: getIt<WatchPlusPurchaseOutcomes>(),
     ),
   );
+  getIt.registerLazySingleton<ReviewPromptService>(() => ReviewPromptService());
 }
