@@ -9,33 +9,7 @@ import '../../../domain/entities/sticker.dart';
 import 'editable_overlay_image.dart';
 import 'editable_sticker_overlay.dart';
 
-/// Hosts every [OverlayImage] and [Sticker] for the diary form as
-/// absolutely positioned, draggable/rotatable/resizable children
-/// stacked on top of [child] (the Quill editor + its surrounding
-/// scroll content).
-///
-/// Generalized to handle both item kinds in one layer (rather than a
-/// separate StickerLayer) since they share identical transform
-/// behavior and coordinate space — only the id namespace and selection
-/// need to stay distinguishable, which is handled here via
-/// [selectedImageId]/[selectedStickerId] being tracked independently
-/// (an image and a sticker could theoretically share the same
-/// generated id string, so they are never merged into one combined
-/// "selected id" concept).
-///
-/// Tapping anywhere in the layer that isn't an image or sticker
-/// deselects whichever one is currently selected.
-///
-/// This widget is meant to be nested *inside* the description area's
-/// `SingleChildScrollView`, wrapping the Quill editor as its scrolling
-/// sibling, so overlay items scroll together with the text as part of
-/// the same `Scrollable` — rather than being pinned to the viewport.
-/// Because of that, this layer's own coordinate space (used to clamp
-/// drag positions in [TransformableItem]) can be *taller* than the
-/// fixed-size viewport referenced by [boundsKey] for a long entry —
-/// see the internal content-bounds key used for clamping vs [boundsKey]
-/// used for "visible area" placement.
-class OverlayLayer extends StatelessWidget {
+class OverlayLayer extends StatefulWidget {
   final Widget child;
   final List<OverlayImage> images;
   final List<Sticker> stickers;
@@ -63,23 +37,9 @@ class OverlayLayer extends StatelessWidget {
 
   final ValueChanged<String> onRemoveImage;
   final ValueChanged<String> onRemoveSticker;
-
-  /// Key of the *viewport* (the fixed-size box wrapping the
-  /// description area's `SingleChildScrollView`) — used only to
-  /// compute "the currently visible area" for placing newly added
-  /// items via [findFreePosition]. Its size never changes as the user
-  /// scrolls or types.
   final GlobalKey boundsKey;
 
-  /// Key of this layer's own root `Stack` — its [RenderBox] is the
-  /// *content's* coordinate space, which can be taller than the
-  /// viewport once the entry has enough text to scroll. Drag/pinch
-  /// clamping in [TransformableItem] uses this (via [getBounds]) so an
-  /// item dragged near the bottom of a long entry isn't incorrectly
-  /// snapped back up into the viewport's fixed height.
-  final GlobalKey _contentBoundsKey = GlobalKey();
-
-   OverlayLayer({
+  const OverlayLayer({
     super.key,
     required this.child,
     required this.images,
@@ -96,35 +56,6 @@ class OverlayLayer extends StatelessWidget {
     required this.boundsKey,
   });
 
-  /// Bounds used for clamping an item's drag position — the layer's own
-  /// content size (which grows with the document), not the fixed
-  /// viewport. Passed as `getBounds` to each [EditableOverlayImage]/
-  /// [EditableStickerOverlay] so `TransformableItem._clampToBounds`
-  /// keeps items within the full scrollable content instead of
-  /// snapping them back into the visible viewport height.
-  Rect? _getContentBounds() {
-    final box =
-        _contentBoundsKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null) return null;
-    return Rect.fromLTWH(0, 0, box.size.width, box.size.height);
-  }
-
-  /// Finds an unoccupied spot for a newly added overlay item, starting
-  /// from the center of [bounds] and spiraling outward if the center is
-  /// already occupied. Falls back to a fixed offset if [bounds] isn't
-  /// available yet (e.g. not laid out on the very first frame).
-  ///
-  /// [bounds] is treated as an arbitrary window within the overlay
-  /// layer's full content coordinate space — its `top`/`left` origin is
-  /// respected rather than assumed to be `(0, 0)`. This is what lets a
-  /// caller pass "the currently scrolled-into-view region" (top offset
-  /// by the current scroll position) for a long entry, so a new sticker
-  /// or overlay image lands where the user is actually looking rather
-  /// than always at the top of the document.
-  ///
-  /// Considers both existing overlay images AND stickers as occupied
-  /// space, so a newly added sticker won't stack directly on top of an
-  /// existing image and vice versa.
   static Offset findFreePosition({
     required Rect? bounds,
     required List<OverlayImage> existingImages,
@@ -194,37 +125,38 @@ class OverlayLayer extends StatelessWidget {
   }
 
   @override
+  State<OverlayLayer> createState() => _OverlayLayerState();
+}
+
+class _OverlayLayerState extends State<OverlayLayer> {
+  final GlobalKey _contentBoundsKey = GlobalKey();
+
+  Rect? _getContentBounds() {
+    final box =
+        _contentBoundsKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    return Rect.fromLTWH(0, 0, box.size.width, box.size.height);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Wrapping the whole Stack in a `KeyedSubtree` (rather than keying
-    // the Stack widget directly) lets `_contentBoundsKey` resolve to
-    // this subtree's own RenderBox — which, per the Stack's default
-    // sizing rule (it matches its one non-positioned child's natural
-    // size), reflects the content's full natural height. That's what
-    // `_getContentBounds` needs for correct drag clamping once an entry
-    // is long enough to scroll past the viewport.
     return KeyedSubtree(
       key: _contentBoundsKey,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Base content (Quill editor etc). This is the Stack's only
-          // non-positioned child, so per Stack's default sizing rules
-          // the whole Stack sizes itself to match this child's natural
-          // size — the overlay items below are all Positioned and
-          // don't contribute to that sizing, so they float on top
-          // without affecting (or collapsing) the editor's layout.
           GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onTap: onDeselect,
-            child: child,
+            onTap: widget.onDeselect,
+            child: widget.child,
           ),
-          for (final image in images)
+          for (final image in widget.images)
             EditableOverlayImage(
-              key: ValueKey('image_${image.id}'),
+              key: ValueKey('image_\${image.id}'),
               image: image,
-              isSelected: selectedImageId == image.id,
+              isSelected: widget.selectedImageId == image.id,
               getBounds: _getContentBounds,
-              onSelect: () => onSelectImage(image.id),
+              onSelect: () => widget.onSelectImage(image.id),
               onUpdate: ({
                 required id,
                 required x,
@@ -232,22 +164,22 @@ class OverlayLayer extends StatelessWidget {
                 required scale,
                 required rotation,
               }) =>
-                  onImageTransform(
+                  widget.onImageTransform(
                 id: id,
                 x: x,
                 y: y,
                 scale: scale,
                 rotation: rotation,
               ),
-              onRemove: () => onRemoveImage(image.id),
+              onRemove: () => widget.onRemoveImage(image.id),
             ),
-          for (final sticker in stickers)
+          for (final sticker in widget.stickers)
             EditableStickerOverlay(
-              key: ValueKey('sticker_${sticker.id}'),
+              key: ValueKey('sticker_\${sticker.id}'),
               sticker: sticker,
-              isSelected: selectedStickerId == sticker.id,
+              isSelected: widget.selectedStickerId == sticker.id,
               getBounds: _getContentBounds,
-              onSelect: () => onSelectSticker(sticker.id),
+              onSelect: () => widget.onSelectSticker(sticker.id),
               onUpdate: ({
                 required id,
                 required x,
@@ -255,14 +187,14 @@ class OverlayLayer extends StatelessWidget {
                 required scale,
                 required rotation,
               }) =>
-                  onStickerTransform(
+                  widget.onStickerTransform(
                 id: id,
                 x: x,
                 y: y,
                 scale: scale,
                 rotation: rotation,
               ),
-              onRemove: () => onRemoveSticker(sticker.id),
+              onRemove: () => widget.onRemoveSticker(sticker.id),
             ),
         ],
       ),

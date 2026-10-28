@@ -1,12 +1,8 @@
 // lib/features/diary_entry/presentation/widgets/overlay/transformable_item.dart
-//
-// Ported from the old project's canvas-editor implementation. Fully
-// generic — no coupling to any domain entity — so it's reused as-is to
-// drive drag / pinch / rotate / resize for overlay images in the new
-// flutter_quill-based editor.
 
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -20,6 +16,27 @@ typedef ItemTransformUpdate =
       required double scale,
       required double rotation,
     });
+
+/// Claims victory in the Gesture Arena as soon as a pointer touches down on
+/// the sticker/image body, preventing the ancestor [SingleChildScrollView]'s
+/// [VerticalDragGestureRecognizer] from stealing upward/downward drags.
+class _EagerScaleGestureRecognizer extends ScaleGestureRecognizer {
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+  }
+}
+
+/// Claims victory in the Gesture Arena for the bottom-right rotate/resize
+/// handle so vertical handle drags are never stolen by the scroll view.
+class _EagerPanGestureRecognizer extends PanGestureRecognizer {
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+  }
+}
 
 class TransformableItem extends StatefulWidget {
   final String id;
@@ -66,29 +83,21 @@ class _TransformableItemState extends State<TransformableItem>
   late double _rotation;
 
   bool _isDragging = false;
-  bool _isHandleActive = false; // true while the combined handle is held
+  bool _isHandleActive = false;
+  bool _didTransform = false;
 
-  // Main drag/pinch
   Offset? _lastFocalPoint;
   double _initialScaleOnGesture = 1.0;
   double _initialRotationOnGesture = 0.0;
 
-  // Combined handle state
-  // We record the finger's global position and the item's state at drag-start,
-  // then each frame we:
-  //   1. Compute angle from item-centre → finger  (→ drives rotation)
-  //   2. Compute distance from item-centre → finger (→ drives scale)
   late Offset _handleDragStartGlobal;
+  late Offset _handleCentreGlobal;
   late double _handleStartScale;
   late double _handleStartRotation;
-  late double
-  _handleStartDistance; // distance at drag-start (divisor for scale)
+  late double _handleStartDistance;
 
-  // Handle press animation
-  late AnimationController _handleAnim;
-  late Animation<double> _handleScale;
-
-  // ── Geometry ───────────────────────────────────────────────────────────────
+  late final AnimationController _handleAnim;
+  late final Animation<double> _handleScale;
 
   double get _visualWidth =>
       (widget.baseWidth ?? TransformableItem.stickerBaseSize) * _scale;
@@ -103,8 +112,6 @@ class _TransformableItemState extends State<TransformableItem>
       pos.dy.clamp(0.0, math.max(0.0, bounds.height - _visualHeight)),
     );
   }
-
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
@@ -136,36 +143,47 @@ class _TransformableItemState extends State<TransformableItem>
     if (widget.initialPosition != old.initialPosition) {
       _position = widget.initialPosition;
     }
-    if (widget.initialScale != old.initialScale) _scale = widget.initialScale;
+    if (widget.initialScale != old.initialScale) {
+      _scale = widget.initialScale;
+    }
     if (widget.initialRotation != old.initialRotation) {
       _rotation = widget.initialRotation;
     }
   }
 
-  // ── Main drag / two-finger pinch ───────────────────────────────────────────
-
   void _onScaleStart(ScaleStartDetails d) {
     if (_isHandleActive) return;
+    if (!widget.isSelected) {
+      widget.onSelect();
+    }
     _isDragging = true;
+    _didTransform = false;
     _lastFocalPoint = d.focalPoint;
     _initialScaleOnGesture = _scale;
     _initialRotationOnGesture = _rotation;
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
-    if (_isHandleActive) return;
+    if (_isHandleActive || _lastFocalPoint == null) return;
     final delta = d.focalPoint - _lastFocalPoint!;
+    _lastFocalPoint = d.focalPoint;
+
     if (d.pointerCount == 1) {
-      setState(() {
-        _position = _clampToBounds(_position + delta);
-        _lastFocalPoint = d.focalPoint;
-      });
+      if (delta == Offset.zero) return;
+      final nextPos = _clampToBounds(_position + delta);
+      if (nextPos != _position) {
+        _didTransform = true;
+        setState(() => _position = nextPos);
+      }
     } else {
+      final nextScale = (_initialScaleOnGesture * d.scale).clamp(0.2, 6.0);
+      final nextRotation = _initialRotationOnGesture + d.rotation;
+      final nextPos = _clampToBounds(_position + delta);
+      _didTransform = true;
       setState(() {
-        _scale = (_initialScaleOnGesture * d.scale).clamp(0.2, 6.0);
-        _rotation = _initialRotationOnGesture + d.rotation;
-        _position = _clampToBounds(_position + delta);
-        _lastFocalPoint = d.focalPoint;
+        _scale = nextScale;
+        _rotation = nextRotation;
+        _position = nextPos;
       });
     }
   }
@@ -173,24 +191,17 @@ class _TransformableItemState extends State<TransformableItem>
   void _onScaleEnd(ScaleEndDetails _) {
     if (_isHandleActive) return;
     _isDragging = false;
-    _commit();
+    _lastFocalPoint = null;
+    if (_didTransform) {
+      _didTransform = false;
+      _commit();
+    }
   }
 
-  // ── Combined rotate + resize handle ────────────────────────────────────────
-  //
-  // UX model (same as PicsArt / Unfold / most diary sticker editors):
-  //
-  //   • The handle sits at the bottom-right corner.
-  //   • On drag-start we record:
-  //       – the vector from item-centre → handle position (gives start angle & distance)
-  //   • Each frame we compute the vector from item-centre → current finger.
-  //       – angleDelta  = currentAngle  - startAngle   → added to rotation
-  //       – scaleFactor = currentDist   / startDist    → multiplied onto scale
-  //
-  // This feels exactly like you're physically spinning and stretching the item
-  // from its corner — the same physical intuition as a real piece of paper.
-
   void _onHandleDragStart(DragStartDetails d) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+
     _isHandleActive = true;
     _isDragging = true;
     _handleAnim.forward();
@@ -200,49 +211,28 @@ class _TransformableItemState extends State<TransformableItem>
     _handleStartScale = _scale;
     _handleStartRotation = _rotation;
 
-    // Convert global handle position to the coordinate space of the
-    // description Stack (which is the parent of this Positioned widget).
-    // We only need the start distance; the start angle is implicitly 0
-    // (we measure all subsequent angles relative to the start vector).
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
-
-    // Item centre in global coordinates
-    final centreGlobal = box.localToGlobal(
+    _handleCentreGlobal = box.localToGlobal(
       Offset(
         TransformableItem.handlePadding + _visualWidth / 2,
         TransformableItem.handlePadding + _visualHeight / 2,
       ),
     );
 
-    final startVec = d.globalPosition - centreGlobal;
+    final startVec = d.globalPosition - _handleCentreGlobal;
     _handleStartDistance = startVec.distance.clamp(10.0, double.infinity);
   }
 
   void _onHandleDragUpdate(DragUpdateDetails d) {
     if (!_isHandleActive) return;
 
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
+    final startVec = _handleDragStartGlobal - _handleCentreGlobal;
+    final currentVec = d.globalPosition - _handleCentreGlobal;
 
-    // Item centre in global coords (recalculate each frame because scale changes)
-    final centreGlobal = box.localToGlobal(
-      Offset(
-        TransformableItem.handlePadding + _visualWidth / 2,
-        TransformableItem.handlePadding + _visualHeight / 2,
-      ),
-    );
-
-    final startVec = _handleDragStartGlobal - centreGlobal;
-    final currentVec = d.globalPosition - centreGlobal;
-
-    // Rotation: signed angle between start vector and current vector
     final angleDelta = math.atan2(
-      startVec.dx * currentVec.dy - startVec.dy * currentVec.dx, // cross
-      startVec.dx * currentVec.dx + startVec.dy * currentVec.dy, // dot
+      startVec.dx * currentVec.dy - startVec.dy * currentVec.dx,
+      startVec.dx * currentVec.dx + startVec.dy * currentVec.dy,
     );
 
-    // Scale: ratio of distances
     final currentDist = currentVec.distance.clamp(10.0, double.infinity);
     final scaleFactor = currentDist / _handleStartDistance;
     final newScale = (_handleStartScale * scaleFactor).clamp(0.2, 6.0);
@@ -250,6 +240,7 @@ class _TransformableItemState extends State<TransformableItem>
     setState(() {
       _rotation = _handleStartRotation + angleDelta;
       _scale = newScale;
+      _position = _clampToBounds(_position);
     });
   }
 
@@ -271,13 +262,10 @@ class _TransformableItemState extends State<TransformableItem>
     );
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // ── Content ────────────────────────────────────────────────────────────
     Widget content = widget.baseWidth != null && widget.baseHeight != null
         ? SizedBox(
             width: _visualWidth,
@@ -298,7 +286,7 @@ class _TransformableItemState extends State<TransformableItem>
       child: content,
     );
 
-    Widget displayChild = widget.isSelected
+    final displayChild = widget.isSelected
         ? CustomPaint(
             painter: DashedBorderPainter(
               color: theme.colorScheme.primary,
@@ -309,62 +297,76 @@ class _TransformableItemState extends State<TransformableItem>
           )
         : paddedChild;
 
-    // ── Handles ────────────────────────────────────────────────────────────
-    final handles = <Widget>[displayChild];
-
-    if (widget.isSelected) {
-      // ✕  Delete — top-left
-      handles.add(
-        Positioned(
-          top: 0,
-          left: 0,
-          child: _HandleButton(
-            onTap: widget.onRemove,
-            backgroundColor: Colors.red,
-            icon: Icons.close_rounded,
-            tooltip: 'Remove',
-          ),
-        ),
-      );
-
-      handles.add(
-        Positioned(
-          bottom: 0,
-          right: 0,
-          child: AnimatedBuilder(
-            animation: _handleScale,
-            builder: (_, child) =>
-                Transform.scale(scale: _handleScale.value, child: child),
-            child: GestureDetector(
-              onPanStart: _onHandleDragStart,
-              onPanUpdate: _onHandleDragUpdate,
-              onPanEnd: _onHandleDragEnd,
-              child: _CombinedHandle(
-                color: theme.colorScheme,
-                isActive: _isHandleActive,
-              ),
+    final bodyGesture = RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: <Type, GestureRecognizerFactory>{
+        _EagerScaleGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<_EagerScaleGestureRecognizer>(
+              _EagerScaleGestureRecognizer.new,
+              (_EagerScaleGestureRecognizer instance) {
+                instance
+                  ..onStart = _onScaleStart
+                  ..onUpdate = _onScaleUpdate
+                  ..onEnd = _onScaleEnd;
+              },
             ),
-          ),
-        ),
-      );
-    }
+      },
+      child: displayChild,
+    );
 
     return Positioned(
       left: _position.dx - TransformableItem.handlePadding,
       top: _position.dy - TransformableItem.handlePadding,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onSelect,
-        onScaleStart: _onScaleStart,
-        onScaleUpdate: _onScaleUpdate,
-        onScaleEnd: _onScaleEnd,
-        child: Stack(clipBehavior: Clip.none, children: handles),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          bodyGesture,
+          if (widget.isSelected) ...[
+            Positioned(
+              top: 0,
+              left: 0,
+              child: _HandleButton(
+                onTap: widget.onRemove,
+                backgroundColor: Colors.red,
+                icon: Icons.close_rounded,
+                tooltip: 'Remove',
+              ),
+            ),
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: AnimatedBuilder(
+                animation: _handleScale,
+                builder: (_, child) =>
+                    Transform.scale(scale: _handleScale.value, child: child),
+                child: RawGestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  gestures: <Type, GestureRecognizerFactory>{
+                    _EagerPanGestureRecognizer:
+                        GestureRecognizerFactoryWithHandlers<
+                          _EagerPanGestureRecognizer
+                        >(_EagerPanGestureRecognizer.new, (
+                          _EagerPanGestureRecognizer instance,
+                        ) {
+                          instance
+                            ..onStart = _onHandleDragStart
+                            ..onUpdate = _onHandleDragUpdate
+                            ..onEnd = _onHandleDragEnd;
+                        }),
+                  },
+                  child: _CombinedHandle(
+                    color: theme.colorScheme,
+                    isActive: _isHandleActive,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
 }
-
-// ── Delete handle ──────────────────────────────────────────────────────────────
 
 class _HandleButton extends StatelessWidget {
   final VoidCallback onTap;
@@ -384,6 +386,7 @@ class _HandleButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Container(
           width: TransformableItem._handleRadius * 2,
@@ -406,9 +409,6 @@ class _HandleButton extends StatelessWidget {
   }
 }
 
-// ── Combined rotate+resize handle ─────────────────────────────────────────────
-// Shows a two-arrow arc icon (rotate) with a small resize pip — same visual
-
 class _CombinedHandle extends StatelessWidget {
   final ColorScheme color;
   final bool isActive;
@@ -417,7 +417,7 @@ class _CombinedHandle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double r = TransformableItem._handleRadius;
+    const double r = TransformableItem._handleRadius;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 120),
       width: r * 2,

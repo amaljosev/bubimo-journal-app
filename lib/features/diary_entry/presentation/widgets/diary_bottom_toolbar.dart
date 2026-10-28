@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 
@@ -11,33 +12,8 @@ import '../../../../core/theme/theme_tokens.dart';
 import '../../../theme/domain/entities/rgba_color.dart';
 import 'font_picker.dart';
 
-/// A request from [DiaryBottomToolbar] to its host page to show one of
-/// its panels — Font, Text color, Lists, Text formatting, or the
-/// selection-scoped style/color panels.
-///
-/// This toolbar does not present any UI for these panels itself
-/// (no `showModalBottomSheet`, no route of any kind). Routed sheets
-/// necessarily animate in *after* the keyboard has started closing —
-/// there's no way to make a `Navigator` push and a platform keyboard's
-/// own close animation land in the same frame, so there's always a
-/// visible beat where the keyboard is still partially up while the
-/// sheet is already sliding in.
-///
-/// Instead, the toolbar hands the host page a [content] builder plus
-/// [refocusOnClose], and the host page is responsible for rendering it
-/// in-place — same screen, same frame as the unfocus, replacing the
-/// keyboard's own footprint rather than animating a new route over
-/// top of it. See `_DiaryFormViewState`'s handling of
-/// `onPanelRequested` in diary_form_page.dart for the actual overlay.
 class DiaryPanelRequest {
   final WidgetBuilder content;
-
-  /// Whether the editor should regain keyboard focus once this panel
-  /// is dismissed. `true` for panels where the user is likely
-  /// mid-composition and about to keep typing (text formatting,
-  /// selection-scoped style/color). `false` for preview/apply panels
-  /// (Font, Text color, Lists) where forcing the keyboard back open
-  /// would undo the point of having closed it.
   final bool refocusOnClose;
 
   const DiaryPanelRequest({
@@ -46,77 +22,152 @@ class DiaryPanelRequest {
   });
 }
 
-/// The single toolbar shown above the keyboard while editing a diary
-/// entry's description.
-///
-/// Two rows, swapped based on whether the Quill selection is currently
-/// collapsed (no text selected) or expanded (text selected):
-///
-/// - No selection → [_CommonToolsRow]: Undo, Redo, **T** (opens the
-///   text-formatting panel: alignment / font size / bold / italic /
-///   underline — nothing else lives in it anymore), **Aa** (font
-///   family picker), **A with a color swatch** (text color — its own
-///   dedicated toolbar item, applying to the whole document),
-///   **Bullet** (opens the list panel: bullet / numbered / checklist),
-///   Quote, Divider, then the image/sticker/background buttons.
-/// - Text selected → [_SelectionToolsRow]: character-level formatting
-///   for the selected run only (style, font color, highlight) — these
-///   correctly use `formatSelection`, which is scoped to the actual
-///   text selection.
-///
-/// Every panel (T, Font, Text color, Lists, and the selection row's
-/// color panel and style picker) is requested via [onPanelRequested]
-/// and rendered by the host page — see [DiaryPanelRequest] for why.
-///
-/// Every button that opens a panel, sheet or picker is protected by a
-/// short tap lock (see [DiaryBottomToolbarState._guardedTap]) so a fast
-/// double-tap can't open the same thing twice. Instant actions (Undo,
-/// Redo, Quote, Divider, closing a panel) are intentionally not locked.
+enum _ActiveSlider { none, text, image }
+
+enum _ActivePanel { none, textFormat, list, font, textColor, selectionColor }
+
+@immutable
+class _ToolbarSnapshot {
+  final bool hasSelection;
+  final bool hasUndo;
+  final bool hasRedo;
+  final bool isBold;
+  final bool isItalic;
+  final bool isUnderline;
+  final bool isStrikeThrough;
+  final String alignment;
+  final String? fontSize;
+  final bool hasColor;
+  final bool isUl;
+  final bool isOl;
+  final bool isChecklist;
+  final bool isQuote;
+
+  const _ToolbarSnapshot({
+    this.hasSelection = false,
+    this.hasUndo = false,
+    this.hasRedo = false,
+    this.isBold = false,
+    this.isItalic = false,
+    this.isUnderline = false,
+    this.isStrikeThrough = false,
+    this.alignment = 'left',
+    this.fontSize,
+    this.hasColor = false,
+    this.isUl = false,
+    this.isOl = false,
+    this.isChecklist = false,
+    this.isQuote = false,
+  });
+
+  factory _ToolbarSnapshot.fromController(quill.QuillController controller) {
+    final style = controller.getSelectionStyle();
+    final attrs = style.attributes;
+
+    bool isAttrActive(quill.Attribute attr) {
+      final current = attrs[attr.key];
+      return current?.value == attr.value;
+    }
+
+    String? alignValue = attrs[quill.Attribute.align.key]?.value as String?;
+    if (alignValue == null && controller.document.root.children.isNotEmpty) {
+      final firstNode = controller.document.root.children.first;
+      if (firstNode is quill.Line) {
+        alignValue = firstNode
+            .style
+            .attributes[quill.Attribute.align.key]
+            ?.value as String?;
+      }
+    }
+
+    return _ToolbarSnapshot(
+      hasSelection: !controller.selection.isCollapsed,
+      hasUndo: controller.hasUndo,
+      hasRedo: controller.hasRedo,
+      isBold: attrs.containsKey(quill.Attribute.bold.key),
+      isItalic: attrs.containsKey(quill.Attribute.italic.key),
+      isUnderline: attrs.containsKey(quill.Attribute.underline.key),
+      isStrikeThrough: attrs.containsKey(quill.Attribute.strikeThrough.key),
+      alignment: alignValue ?? 'left',
+      fontSize: attrs[quill.Attribute.size.key]?.value as String?,
+      hasColor: attrs.containsKey(quill.Attribute.color.key),
+      isUl: isAttrActive(quill.Attribute.ul),
+      isOl: isAttrActive(quill.Attribute.ol),
+      isChecklist:
+          isAttrActive(quill.Attribute.unchecked) ||
+          isAttrActive(quill.Attribute.checked),
+      isQuote: isAttrActive(quill.Attribute.blockQuote),
+    );
+  }
+
+  bool get isAnyListActive => isUl || isOl || isChecklist;
+
+  bool get isAnyTextFormatActive =>
+      isBold ||
+      isItalic ||
+      isUnderline ||
+      alignment != 'left' ||
+      fontSize != null ||
+      hasColor ||
+      isAnyListActive ||
+      isQuote;
+
+  bool get hasAnyCharacterStyleExcludingColor =>
+      isBold || isItalic || isUnderline || isStrikeThrough;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _ToolbarSnapshot &&
+          hasSelection == other.hasSelection &&
+          hasUndo == other.hasUndo &&
+          hasRedo == other.hasRedo &&
+          isBold == other.isBold &&
+          isItalic == other.isItalic &&
+          isUnderline == other.isUnderline &&
+          isStrikeThrough == other.isStrikeThrough &&
+          alignment == other.alignment &&
+          fontSize == other.fontSize &&
+          hasColor == other.hasColor &&
+          isUl == other.isUl &&
+          isOl == other.isOl &&
+          isChecklist == other.isChecklist &&
+          isQuote == other.isQuote;
+
+  @override
+  int get hashCode => Object.hash(
+    hasSelection,
+    hasUndo,
+    hasRedo,
+    isBold,
+    isItalic,
+    isUnderline,
+    isStrikeThrough,
+    alignment,
+    fontSize,
+    hasColor,
+    isUl,
+    isOl,
+    isChecklist,
+    isQuote,
+  );
+}
+
 class DiaryBottomToolbar extends StatefulWidget {
   final quill.QuillController controller;
   final FocusNode editorFocusNode;
   final String? selectedFontFamily;
   final ValueChanged<String?> onFontSelected;
-
-  /// Fired whenever the user changes alignment from the T panel.
-  /// [alignment] is `'left'`, `'center'`, `'right'`, or `'justify'` —
-  /// the parent form page is responsible for both applying it to the
-  /// title field (as `TextAlign`) and dispatching it to
-  /// `DiaryFormBloc`, since alignment is meant to apply to the whole
-  /// entry, not just the Quill description this toolbar sits under.
   final ValueChanged<String> onAlignmentChanged;
-
-  /// Fired whenever Bold/Italic/Underline are toggled from the T
-  /// panel. Same "whole entry" reasoning as [onAlignmentChanged] — the
-  /// title field can't carry a Quill attribute of its own, so the
-  /// parent form page mirrors these onto the title's `TextStyle` in
-  /// addition to whatever this toolbar already applied to the Quill
-  /// description.
   final ValueChanged<bool> onBoldChanged;
   final ValueChanged<bool> onItalicChanged;
   final ValueChanged<bool> onUnderlineChanged;
-
-  /// Fired when a font size is picked in the T panel. `null` means
-  /// "Normal" (clear back to default). Value is a numeric point-size
-  /// string (see `_fontSizeOptions`) — the parent parses it to a
-  /// `double` for the title's `TextStyle.fontSize`.
   final ValueChanged<String?> onFontSizeChanged;
-
-  /// Fired when a color is picked (or cleared, passing `null`) in the
-  /// dedicated "Text color" panel. Value is a `#RRGGBB` hex string.
   final ValueChanged<String?> onTextColorChanged;
-
   final VoidCallback onBackgroundPressed;
   final VoidCallback onStickerPressed;
   final VoidCallback onOverlayImagePressed;
   final VoidCallback onInlineImagePressed;
-
-  /// Called with a [DiaryPanelRequest] when a toolbar button wants to
-  /// open a panel, and with `null` when the toolbar wants it closed
-  /// (e.g. the List panel closes itself right after a tap — see
-  /// `_ListPanel._toggleAndClose`). The host page owns actually
-  /// rendering/dismissing the panel; this toolbar only ever reports
-  /// open/close intent.
   final ValueChanged<DiaryPanelRequest?> onPanelRequested;
 
   const DiaryBottomToolbar({
@@ -142,49 +193,26 @@ class DiaryBottomToolbar extends StatefulWidget {
   State<DiaryBottomToolbar> createState() => DiaryBottomToolbarState();
 }
 
-/// Which panel (if any) is currently open — drives both the relevant
-/// toolbar button's active/highlighted state and, via
-/// [DiaryBottomToolbarState.closeActivePanel], tells the host page to
-/// dismiss whatever it's currently showing.
-enum _ActivePanel { none, textFormat, list, font, textColor, selectionColor }
-
 class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
-  static const double _barHeight = 60;
+  static const double _barHeight = 56;
+  static const double _sliderHeight = 52;
+  static const double totalHeight = _barHeight + 24;
+  static const Duration _tapLockDuration = Duration(milliseconds: 500);
 
-  /// This toolbar's total vertical footprint — the fixed `10`-logical-pixel
-  /// top/bottom padding plus the bar itself — *excluding* the device's own
-  /// bottom safe-area inset, since that's consumed by this widget's own
-  /// [SafeArea] and isn't something the host page needs to additionally
-  /// account for. Exposed so [DiaryFormPage]'s description scroll view can
-  /// reserve exactly this much space (via `scrollBottomInset`/scroll
-  /// padding) so the last line of a long entry is never hidden behind this
-  /// always-visible bar.
-  static const double totalHeight = _barHeight + 20;
+  late final ValueNotifier<_ToolbarSnapshot> _snapshotNotifier;
 
-  /// How long repeat taps on panel/sheet buttons are ignored after the
-  /// first one goes through. Long enough to cover the keyboard-close +
-  /// panel-open animation, short enough that a deliberate second tap
-  /// still feels responsive.
-  static const Duration _tapLockDuration = Duration(milliseconds: 600);
-
+  _ActiveSlider _activeSlider = _ActiveSlider.none;
   _ActivePanel _activePanel = _ActivePanel.none;
 
-  /// Active while the tap lock is engaged. A plain [Timer] is used
-  /// instead of a bool + setState because the lock has no visual
-  /// effect, so nothing needs to rebuild when it engages or releases.
   Timer? _tapLockTimer;
   bool get _isTapLocked => _tapLockTimer?.isActive ?? false;
-
-  // Only selection changes (collapsed <-> expanded) need to rebuild
-  // this widget to swap rows; every other controller change (typing,
-  // formatting) is handled by the individual buttons re-reading style
-  // state directly, so this listener is intentionally the only thing
-  // that calls setState here for controller changes.
-  bool _lastHadSelection = false;
 
   @override
   void initState() {
     super.initState();
+    _snapshotNotifier = ValueNotifier(
+      _ToolbarSnapshot.fromController(widget.controller),
+    );
     widget.controller.addListener(_onControllerChanged);
   }
 
@@ -194,6 +222,9 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
+      _snapshotNotifier.value = _ToolbarSnapshot.fromController(
+        widget.controller,
+      );
     }
   }
 
@@ -201,51 +232,39 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   void dispose() {
     _tapLockTimer?.cancel();
     widget.controller.removeListener(_onControllerChanged);
+    _snapshotNotifier.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
-    final hasSelection = !widget.controller.selection.isCollapsed;
-    if (hasSelection != _lastHadSelection) {
-      if (hasSelection) {
-        widget.editorFocusNode.unfocus();
+    final next = _ToolbarSnapshot.fromController(widget.controller);
+    final previousHadSelection = _snapshotNotifier.value.hasSelection;
+
+    if (next.hasSelection != previousHadSelection && next.hasSelection) {
+      widget.editorFocusNode.unfocus();
+      if (_activeSlider != _ActiveSlider.none) {
+        setState(() => _activeSlider = _ActiveSlider.none);
       }
-      setState(() => _lastHadSelection = hasSelection);
     }
+    _snapshotNotifier.value = next;
   }
 
-  /// Runs [action] unless another guarded tap already went through
-  /// within [_tapLockDuration].
-  ///
-  /// PROBLEM THIS FIXES: tapping a panel/sheet button quickly several
-  /// times fired its callback several times before the first panel had
-  /// finished opening, so the same panel/sheet was requested (and
-  /// stacked) multiple times.
-  ///
-  /// The lock is deliberately shared by every guarded button in this
-  /// toolbar: while one panel/sheet is opening, a tap on a *different*
-  /// panel button would just fight it for the same keyboard footprint,
-  /// so ignoring it is correct. Instant actions (Undo, Redo, Quote,
-  /// Divider) and [closeActivePanel] do not go through this guard.
   void _guardedTap(VoidCallback action) {
     if (_isTapLocked) return;
     _tapLockTimer = Timer(_tapLockDuration, () {});
     action();
   }
 
-  /// Tells the host page to show [content], tracking [panel] as the
-  /// active one for this toolbar's own button-highlight state.
-  ///
-  /// Unlike the previous `showModalBottomSheet`-based implementation,
-  /// this does no unfocus ing itself — the host page's overlay handles
-  /// capturing the keyboard height and unfocus ing, since it needs to
-  /// do that *before* this is even called (the height has to be read
-  /// while the keyboard is still up). See
-  /// `_DiaryFormViewState._openPanel` in diary_form_page.dart.
-  ///
-  /// Guarded by [_guardedTap], so every panel-opening button (T, Aa,
-  /// text color, lists, style picker, selection color/highlight) is
-  /// protected against rapid repeat taps from this one place.
+  void _toggleSlider(_ActiveSlider slider) {
+    if (_activePanel != _ActivePanel.none) {
+      _activePanel = _ActivePanel.none;
+      widget.onPanelRequested(null);
+    }
+    setState(() {
+      _activeSlider = (_activeSlider == slider) ? _ActiveSlider.none : slider;
+    });
+  }
+
   void _requestPanel(
     _ActivePanel panel,
     WidgetBuilder builder, {
@@ -259,37 +278,30 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     });
   }
 
-  /// Tells the host page to dismiss whatever panel is currently open,
-  /// clearing this toolbar's own active-panel tracking to match.
-  /// Safe to call even when nothing is open.
-  ///
-  /// Intentionally NOT guarded: the user (or a panel closing itself,
-  /// like [_ListPanel]) must always be able to dismiss a panel.
   void closeActivePanel() {
-    if (_activePanel == _ActivePanel.none) return;
-    setState(() => _activePanel = _ActivePanel.none);
-    widget.onPanelRequested(null);
+    if (_activePanel == _ActivePanel.none &&
+        _activeSlider == _ActiveSlider.none) {
+      return;
+    }
+    final hadPanel = _activePanel != _ActivePanel.none;
+    setState(() {
+      _activePanel = _ActivePanel.none;
+      _activeSlider = _ActiveSlider.none;
+    });
+    if (hadPanel) {
+      widget.onPanelRequested(null);
+    }
   }
 
-  /// Kept as a distinct method so existing call sites that reference
-  /// it by name don't need to change. Focus restoration on close is
-  /// entirely up to the host page now (driven by the
-  /// [DiaryPanelRequest.refocusOnClose] flag that was passed in when
-  /// the panel was opened), so this is equivalent to
-  /// [closeActivePanel] — kept only for call-site compatibility.
   void closeActivePanelAndRestoreFocus() => closeActivePanel();
 
-  /// Refocus policy: **on**. The T panel includes Bold/Italic/
-  /// Underline alongside alignment and font size — attributes people
-  /// commonly keep toggling while they continue composing, so
-  /// snapping the keyboard back open matches what they're likely to
-  /// do next.
   void _openTextFormatPanel() {
     _requestPanel(
       _ActivePanel.textFormat,
-      (panelContext) => _TextFormatPanel(
+      (_) => _TextFormatPanel(
         controller: widget.controller,
-        onAlignmentChanged: widget.onAlignmentChanged,
+        snapshotListenable: _snapshotNotifier,
+        onAlignmentSelected: _applyAlignmentToWholeDocument,
         onBoldChanged: widget.onBoldChanged,
         onItalicChanged: widget.onItalicChanged,
         onUnderlineChanged: widget.onUnderlineChanged,
@@ -299,26 +311,25 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     );
   }
 
-  /// Refocus policy: **off**. Picking a list style is a single
-  /// preview/apply action (the panel closes itself right after, see
-  /// `_ListPanel._toggleAndClose`) — there's no implied "now keep
-  /// typing", so leave the keyboard closed.
   void _openListPanel() {
     _requestPanel(
       _ActivePanel.list,
-      (panelContext) =>
-          _ListPanel(controller: widget.controller, onDone: closeActivePanel),
+      (_) => _ListPanel(
+        controller: widget.controller,
+        snapshotListenable: _snapshotNotifier,
+        onDone: () {
+          setState(() => _activePanel = _ActivePanel.none);
+          widget.onPanelRequested(null);
+        },
+      ),
       refocusOnClose: false,
     );
   }
 
-  /// Refocus policy: **off**. Choosing a font is a preview action —
-  /// the user wants to see how the entry looks, not resume typing
-  /// immediately.
   void _openFontPanel() {
     _requestPanel(
       _ActivePanel.font,
-      (panelContext) => FontPicker(
+      (_) => FontPicker(
         selectedFontFamily: widget.selectedFontFamily,
         onFontSelected: widget.onFontSelected,
       ),
@@ -326,12 +337,10 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     );
   }
 
-  /// Refocus policy: **off**. Same reasoning as the font panel —
-  /// applying a document-wide text color is a preview/apply action.
   void _openTextColorPanel() {
     _requestPanel(
       _ActivePanel.textColor,
-      (panelContext) => _DocumentColorPanel(
+      (_) => _DocumentColorPanel(
         controller: widget.controller,
         onTextColorChanged: widget.onTextColorChanged,
       ),
@@ -339,16 +348,10 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     );
   }
 
-  /// Refocus policy: **on**. This panel only opens while there's an
-  /// active text *selection* (it's part of [_SelectionToolsRow]),
-  /// which only exists while the user is actively mid-edit — so
-  /// unlike the document-wide Font/Text-color panels, returning here
-  /// implies they're about to keep working in the editor, most likely
-  /// with the same selection still in play.
   void _openSelectionColorPanel({required bool isHighlight}) {
     _requestPanel(
       _ActivePanel.selectionColor,
-      (panelContext) => _FontColorPanel(
+      (_) => _FontColorPanel(
         controller: widget.controller,
         isHighlight: isHighlight,
       ),
@@ -356,82 +359,284 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     );
   }
 
-  /// Refocus policy: **on**. Same reasoning as the selection color
-  /// panel — only reachable while a selection is active.
   void _openStylePicker() {
     final style = widget.controller.getSelectionStyle();
     _requestPanel(
-      _ActivePanel.selectionColor, // shares the row's single "active" slot
-      (panelContext) =>
-          _StylePickerSheet(controller: widget.controller, initialStyle: style),
+      _ActivePanel.selectionColor,
+      (_) => _StylePickerSheet(
+        controller: widget.controller,
+        initialStyle: style,
+      ),
       refocusOnClose: true,
+    );
+  }
+
+  void _toggleWholeDocAttribute(
+    quill.Attribute attribute,
+    bool currentlyActive,
+    ValueChanged<bool> onChanged,
+  ) {
+    final length = widget.controller.document.length;
+    final nowActive = !currentlyActive;
+    final targetAttr =
+        currentlyActive ? quill.Attribute.clone(attribute, null) : attribute;
+    if (length > 0) {
+      widget.controller.formatText(0, length, targetAttr);
+    }
+    widget.controller.formatSelection(targetAttr);
+    onChanged(nowActive);
+  }
+
+  /// Applies [alignment] across every line (`\n`) in the entire Quill
+  /// document as well as reporting it to the parent page for the Title field.
+  void _applyAlignmentToWholeDocument(quill.Attribute alignment) {
+    final value = (alignment.value as String?) ?? 'left';
+    final targetAttr = alignment == quill.Attribute.leftAlignment
+        ? quill.Attribute.clone(quill.Attribute.align, null)
+        : alignment;
+
+    final length = widget.controller.document.length;
+    if (length > 0) {
+      widget.controller.formatText(0, length, targetAttr);
+    }
+    widget.onAlignmentChanged(value);
+  }
+
+  void _cycleAlignment(String currentAlignment) {
+    final nextIndex = switch (currentAlignment) {
+      'left' => 1,
+      'center' => 2,
+      'right' => 3,
+      _ => 0,
+    };
+    _applyAlignmentToWholeDocument(_alignmentCycle[nextIndex]);
+  }
+
+  void _cycleFontSize(String? currentFontSize) {
+    final currentIndex = _fontSizeOptions.indexWhere(
+      (o) => o.value == currentFontSize,
+    );
+    final nextIndex = (currentIndex + 1) % _fontSizeOptions.length;
+    final nextValue = _fontSizeOptions[nextIndex].value;
+
+    final length = widget.controller.document.length;
+    final attr = nextValue == null
+        ? quill.Attribute.clone(quill.Attribute.size, null)
+        : quill.Attribute(
+            quill.Attribute.size.key,
+            quill.AttributeScope.inline,
+            nextValue,
+          );
+    if (length > 0) {
+      widget.controller.formatText(0, length, attr);
+    }
+    widget.controller.formatSelection(attr);
+    widget.onFontSizeChanged(nextValue);
+  }
+
+  void _toggleQuote(bool currentlyActive) {
+    widget.controller.formatSelection(
+      currentlyActive
+          ? quill.Attribute.clone(quill.Attribute.blockQuote, null)
+          : quill.Attribute.blockQuote,
+    );
+  }
+
+  void _insertDivider() {
+    final index = widget.controller.selection.baseOffset.clamp(
+      0,
+      widget.controller.document.length,
+    );
+    widget.controller.replaceText(
+      index,
+      0,
+      DividerEmbed.instance,
+      TextSelection.collapsed(offset: index + 1),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hasSelection = !widget.controller.selection.isCollapsed;
+    final colorScheme = theme.colorScheme;
 
-    // The bar itself still reads as a lifted, rounded card — that part
-    // of the earlier redesign holds regardless of how its panels are
-    // presented.
     return SafeArea(
       child: Align(
         alignment: Alignment.bottomCenter,
         child: Padding(
-          padding: const EdgeInsets.only(left: 10.0, top: 10.0, bottom: 10.0),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(ThemeRadii.xxl),
-              bottomLeft: Radius.circular(ThemeRadii.xxl),
-            ),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.onPrimary,
-                boxShadow: [
-                  BoxShadow(
-                    color: theme.colorScheme.shadow.withValues(alpha: 0.10),
-                    blurRadius: 20,
-                    offset: const Offset(0, -6),
-                  ),
-                ],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(ThemeRadii.xxl),
+              border: Border.all(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.45),
               ),
-              child: SizedBox(
-                height: _barHeight,
-                child: AnimatedSwitcher(
-                  duration: ThemeDurations.fast,
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  child: hasSelection
-                      ? _SelectionToolsRow(
-                          key: const ValueKey('selection'),
-                          controller: widget.controller,
-                          activePanel: _activePanel,
-                          onOpenStylePicker: _openStylePicker,
-                          onOpenColorPanel: _openSelectionColorPanel,
-                        )
-                      : _CommonToolsRow(
-                          key: const ValueKey('common'),
-                          controller: widget.controller,
-                          activePanel: _activePanel,
-                          onOpenTextFormatPanel: _openTextFormatPanel,
-                          onOpenListPanel: _openListPanel,
-                          onOpenFontPanel: _openFontPanel,
-                          onOpenTextColorPanel: _openTextColorPanel,
-                          // These four hand off to the host page, which
-                          // opens its own sheets/pickers, so they share
-                          // the same tap lock as the panel buttons.
-                          onBackgroundPressed: () =>
-                              _guardedTap(widget.onBackgroundPressed),
-                          onStickerPressed: () =>
-                              _guardedTap(widget.onStickerPressed),
-                          onOverlayImagePressed: () =>
-                              _guardedTap(widget.onOverlayImagePressed),
-                          onInlineImagePressed: () =>
-                              _guardedTap(widget.onInlineImagePressed),
-                        ),
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.shadow.withValues(alpha: 0.10),
+                  blurRadius: 24,
+                  offset: const Offset(0, 6),
                 ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(ThemeRadii.xxl),
+              child: ValueListenableBuilder<_ToolbarSnapshot>(
+                valueListenable: _snapshotNotifier,
+                builder: (context, snapshot, _) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.bottomCenter,
+                        child: (!snapshot.hasSelection &&
+                                _activeSlider != _ActiveSlider.none)
+                            ? Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    height: _sliderHeight,
+                                    child: AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
+                                      switchInCurve: Curves.easeOutCubic,
+                                      switchOutCurve: Curves.easeInCubic,
+                                      transitionBuilder: (child, animation) {
+                                        final slide = Tween<Offset>(
+                                          begin: const Offset(0.08, 0.25),
+                                          end: Offset.zero,
+                                        ).animate(animation);
+                                        return FadeTransition(
+                                          opacity: animation,
+                                          child: SlideTransition(
+                                            position: slide,
+                                            child: child,
+                                          ),
+                                        );
+                                      },
+                                      child: _activeSlider == _ActiveSlider.text
+                                          ? _TextOptionsSlider(
+                                              key: const ValueKey('slider_t'),
+                                              snapshot: snapshot,
+                                              activePanel: _activePanel,
+                                              selectedFontFamily:
+                                                  widget.selectedFontFamily,
+                                              onOpenFontPanel: _openFontPanel,
+                                              onOpenTextColorPanel:
+                                                  _openTextColorPanel,
+                                              onOpenTextFormatPanel:
+                                                  _openTextFormatPanel,
+                                              onOpenListPanel: _openListPanel,
+                                              onToggleBold: () =>
+                                                  _toggleWholeDocAttribute(
+                                                    quill.Attribute.bold,
+                                                    snapshot.isBold,
+                                                    widget.onBoldChanged,
+                                                  ),
+                                              onToggleItalic: () =>
+                                                  _toggleWholeDocAttribute(
+                                                    quill.Attribute.italic,
+                                                    snapshot.isItalic,
+                                                    widget.onItalicChanged,
+                                                  ),
+                                              onToggleUnderline: () =>
+                                                  _toggleWholeDocAttribute(
+                                                    quill.Attribute.underline,
+                                                    snapshot.isUnderline,
+                                                    widget.onUnderlineChanged,
+                                                  ),
+                                              onCycleAlignment: () =>
+                                                  _cycleAlignment(
+                                                    snapshot.alignment,
+                                                  ),
+                                              onCycleFontSize: () =>
+                                                  _cycleFontSize(
+                                                    snapshot.fontSize,
+                                                  ),
+                                              onToggleQuote: () => _toggleQuote(
+                                                snapshot.isQuote,
+                                              ),
+                                              onInsertDivider: _insertDivider,
+                                            )
+                                          : _ImageOptionsSlider(
+                                              key: const ValueKey('slider_img'),
+                                              onInlineImagePressed: () {
+                                                setState(
+                                                  () => _activeSlider =
+                                                      _ActiveSlider.none,
+                                                );
+                                                _guardedTap(
+                                                  widget.onInlineImagePressed,
+                                                );
+                                              },
+                                              onOverlayImagePressed: () {
+                                                setState(
+                                                  () => _activeSlider =
+                                                      _ActiveSlider.none,
+                                                );
+                                                _guardedTap(
+                                                  widget.onOverlayImagePressed,
+                                                );
+                                              },
+                                            ),
+                                    ),
+                                  ),
+                                  Divider(
+                                    height: 1,
+                                    thickness: 1,
+                                    color: colorScheme.outlineVariant
+                                        .withValues(alpha: 0.35),
+                                  ),
+                                ],
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                      SizedBox(
+                        height: _barHeight,
+                        child: AnimatedSwitcher(
+                          duration: ThemeDurations.fast,
+                          switchInCurve: Curves.easeOut,
+                          switchOutCurve: Curves.easeIn,
+                          child: snapshot.hasSelection
+                              ? _SelectionToolsRow(
+                                  key: const ValueKey('row_selection'),
+                                  snapshot: snapshot,
+                                  activePanel: _activePanel,
+                                  onOpenStylePicker: _openStylePicker,
+                                  onOpenColorPanel: _openSelectionColorPanel,
+                                )
+                              : _PrimaryCategoryRow(
+                                  key: const ValueKey('row_primary'),
+                                  snapshot: snapshot,
+                                  activeSlider: _activeSlider,
+                                  onUndo: snapshot.hasUndo
+                                      ? widget.controller.undo
+                                      : null,
+                                  onRedo: snapshot.hasRedo
+                                      ? widget.controller.redo
+                                      : null,
+                                  onToggleTextSlider: () =>
+                                      _toggleSlider(_ActiveSlider.text),
+                                  onToggleImageSlider: () =>
+                                      _toggleSlider(_ActiveSlider.image),
+                                  onStickerPressed: () {
+                                    closeActivePanel();
+                                    _guardedTap(widget.onStickerPressed);
+                                  },
+                                  onBackgroundPressed: () {
+                                    closeActivePanel();
+                                    _guardedTap(widget.onBackgroundPressed);
+                                  },
+                                ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -441,8 +646,392 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   }
 }
 
-/// Shared small icon-button look used by every button in every row, so
-/// spacing/size/ripple stay visually identical throughout the toolbar.
+class _PrimaryCategoryRow extends StatelessWidget {
+  final _ToolbarSnapshot snapshot;
+  final _ActiveSlider activeSlider;
+  final VoidCallback? onUndo;
+  final VoidCallback? onRedo;
+  final VoidCallback onToggleTextSlider;
+  final VoidCallback onToggleImageSlider;
+  final VoidCallback onStickerPressed;
+  final VoidCallback onBackgroundPressed;
+
+  const _PrimaryCategoryRow({
+    super.key,
+    required this.snapshot,
+    required this.activeSlider,
+    required this.onUndo,
+    required this.onRedo,
+    required this.onToggleTextSlider,
+    required this.onToggleImageSlider,
+    required this.onStickerPressed,
+    required this.onBackgroundPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isTextOpen = activeSlider == _ActiveSlider.text;
+    final isImageOpen = activeSlider == _ActiveSlider.image;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ToolbarIconButton(
+                icon: Icons.undo_rounded,
+                tooltip: 'Undo',
+                onPressed: onUndo,
+              ),
+              const SizedBox(width: 2),
+              _ToolbarIconButton(
+                icon: Icons.redo_rounded,
+                tooltip: 'Redo',
+                onPressed: onRedo,
+              ),
+            ],
+          ),
+          const _ToolbarDivider(),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _CategoryToggleButton(
+                  textLabel: 'T',
+                  tooltip: 'Text options',
+                  isOpen: isTextOpen,
+                  hasActiveDot: !isTextOpen && snapshot.isAnyTextFormatActive,
+                  onPressed: onToggleTextSlider,
+                ),
+                _CategoryToggleButton(
+                  icon: Icons.image_outlined,
+                  tooltip: 'Photo options',
+                  isOpen: isImageOpen,
+                  onPressed: onToggleImageSlider,
+                ),
+                _ToolbarIconButton(
+                  icon: Icons.auto_awesome_outlined,
+                  tooltip: 'Stickers',
+                  onPressed: onStickerPressed,
+                ),
+                _ToolbarIconButton(
+                  icon: CupertinoIcons.layers,
+                  tooltip: 'Background',
+                  onPressed: onBackgroundPressed,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TextOptionsSlider extends StatelessWidget {
+  final _ToolbarSnapshot snapshot;
+  final _ActivePanel activePanel;
+  final String? selectedFontFamily;
+  final VoidCallback onOpenFontPanel;
+  final VoidCallback onOpenTextColorPanel;
+  final VoidCallback onOpenTextFormatPanel;
+  final VoidCallback onOpenListPanel;
+  final VoidCallback onToggleBold;
+  final VoidCallback onToggleItalic;
+  final VoidCallback onToggleUnderline;
+  final VoidCallback onCycleAlignment;
+  final VoidCallback onCycleFontSize;
+  final VoidCallback onToggleQuote;
+  final VoidCallback onInsertDivider;
+
+  const _TextOptionsSlider({
+    super.key,
+    required this.snapshot,
+    required this.activePanel,
+    required this.selectedFontFamily,
+    required this.onOpenFontPanel,
+    required this.onOpenTextColorPanel,
+    required this.onOpenTextFormatPanel,
+    required this.onOpenListPanel,
+    required this.onToggleBold,
+    required this.onToggleItalic,
+    required this.onToggleUnderline,
+    required this.onCycleAlignment,
+    required this.onCycleFontSize,
+    required this.onToggleQuote,
+    required this.onInsertDivider,
+  });
+
+  String get _fontSizeLabel {
+    for (final option in _fontSizeOptions) {
+      if (option.value == snapshot.fontSize) return option.label;
+    }
+    return 'M';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ToolbarIconButton(
+            textLabel: 'Aa',
+            tooltip: 'Font family',
+            isActive:
+                activePanel == _ActivePanel.font || selectedFontFamily != null,
+            onPressed: onOpenFontPanel,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.format_color_text_rounded,
+            tooltip: 'Text color',
+            isActive: activePanel == _ActivePanel.textColor || snapshot.hasColor,
+            onPressed: onOpenTextColorPanel,
+          ),
+          _ToolbarIconButton(
+            textLabel: _fontSizeLabel,
+            tooltip: 'Cycle font size ($_fontSizeLabel)',
+            isActive: snapshot.fontSize != null,
+            onPressed: onCycleFontSize,
+          ),
+          const _ToolbarDivider(),
+          _ToolbarIconButton(
+            icon: Icons.format_bold_rounded,
+            tooltip: 'Bold',
+            isActive: snapshot.isBold,
+            onPressed: onToggleBold,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.format_italic_rounded,
+            tooltip: 'Italic',
+            isActive: snapshot.isItalic,
+            onPressed: onToggleItalic,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.format_underline_rounded,
+            tooltip: 'Underline',
+            isActive: snapshot.isUnderline,
+            onPressed: onToggleUnderline,
+          ),
+          _ToolbarIconButton(
+            icon: _alignmentIcons[snapshot.alignment] ??
+                Icons.format_align_left_rounded,
+            tooltip: 'Alignment (${snapshot.alignment})',
+            isActive: snapshot.alignment != 'left',
+            onPressed: onCycleAlignment,
+          ),
+          const _ToolbarDivider(),
+          _ToolbarIconButton(
+            icon: Icons.format_list_bulleted_rounded,
+            tooltip: 'Lists',
+            isActive:
+                activePanel == _ActivePanel.list || snapshot.isAnyListActive,
+            onPressed: onOpenListPanel,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.format_quote_rounded,
+            tooltip: 'Quote',
+            isActive: snapshot.isQuote,
+            onPressed: onToggleQuote,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.horizontal_rule_rounded,
+            tooltip: 'Divider',
+            onPressed: onInsertDivider,
+          ),
+          _ToolbarIconButton(
+            icon: Icons.tune_rounded,
+            tooltip: 'All text format options',
+            isActive: activePanel == _ActivePanel.textFormat,
+            onPressed: onOpenTextFormatPanel,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ImageOptionsSlider extends StatelessWidget {
+  final VoidCallback onInlineImagePressed;
+  final VoidCallback onOverlayImagePressed;
+
+  const _ImageOptionsSlider({
+    super.key,
+    required this.onInlineImagePressed,
+    required this.onOverlayImagePressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SlideActionPill(
+              icon: Icons.art_track_rounded,
+              label: 'Inline Photo',
+              onTap: onInlineImagePressed,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _SlideActionPill(
+              icon: Icons.filter_none_rounded,
+              label: 'Sticky Photo',
+              onTap: onOverlayImagePressed,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SlideActionPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SlideActionPill({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Material(
+      color: colorScheme.primary.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(ThemeRadii.lg),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(ThemeRadii.lg),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryToggleButton extends StatelessWidget {
+  final IconData? icon;
+  final String? textLabel;
+  final String tooltip;
+  final bool isOpen;
+  final bool hasActiveDot;
+  final VoidCallback onPressed;
+
+  const _CategoryToggleButton({
+    this.icon,
+    this.textLabel,
+    required this.tooltip,
+    required this.isOpen,
+    this.hasActiveDot = false,
+    required this.onPressed,
+  }) : assert(icon != null || textLabel != null);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final fgColor = isOpen ? colorScheme.onPrimary : colorScheme.primary;
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(ThemeRadii.md),
+        onTap: onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          height: 38,
+          padding: EdgeInsets.symmetric(horizontal: isOpen ? 12 : 10),
+          decoration: BoxDecoration(
+            color: isOpen ? colorScheme.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(ThemeRadii.md),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (icon != null)
+                    Icon(icon, size: 22, color: fgColor)
+                  else
+                    Text(
+                      textLabel!,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: fgColor,
+                      ),
+                    ),
+                  if (hasActiveDot)
+                    Positioned(
+                      right: -3,
+                      top: -2,
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: isOpen
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: 4),
+                        child: Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 16,
+                          color: fgColor,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ToolbarIconButton extends StatelessWidget {
   final IconData? icon;
   final String? textLabel;
@@ -464,7 +1053,10 @@ class _ToolbarIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = theme.colorScheme.primary;
+    final isEnabled = onPressed != null;
+    final color = isEnabled
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurface.withValues(alpha: 0.32);
 
     return Tooltip(
       message: tooltip,
@@ -474,8 +1066,8 @@ class _ToolbarIconButton extends StatelessWidget {
         child: AnimatedContainer(
           duration: ThemeDurations.fast,
           curve: Curves.easeOut,
-          width: 40,
-          height: 40,
+          width: 38,
+          height: 38,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: isActive
@@ -484,11 +1076,11 @@ class _ToolbarIconButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(ThemeRadii.sm),
           ),
           child: icon != null
-              ? Icon(icon, size: 22, color: color)
+              ? Icon(icon, size: 21, color: color)
               : Text(
                   textLabel!,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                     color: color,
                   ),
                 ),
@@ -505,17 +1097,15 @@ class _ToolbarDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 1,
-      height: 24,
+      height: 22,
       margin: const EdgeInsets.symmetric(horizontal: ThemeSpacing.xs),
       color: Theme.of(
         context,
-      ).colorScheme.outlineVariant.withValues(alpha: 0.6),
+      ).colorScheme.outlineVariant.withValues(alpha: 0.5),
     );
   }
 }
 
-/// Section label used inside the panels (e.g. "Alignment", "Font
-/// size") to visually group related controls.
 class _PanelSectionLabel extends StatelessWidget {
   final String label;
 
@@ -543,10 +1133,6 @@ class _PanelSectionLabel extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Common tools row (no text selected)
-// ---------------------------------------------------------------------------
-
 const List<quill.Attribute> _alignmentCycle = [
   quill.Attribute.leftAlignment,
   quill.Attribute.centerAlignment,
@@ -561,213 +1147,17 @@ const Map<String, IconData> _alignmentIcons = {
   'justify': Icons.format_align_justify_rounded,
 };
 
-class _CommonToolsRow extends StatefulWidget {
-  final quill.QuillController controller;
-  final _ActivePanel activePanel;
-  final VoidCallback onOpenTextFormatPanel;
-  final VoidCallback onOpenListPanel;
-  final VoidCallback onOpenFontPanel;
-  final VoidCallback onOpenTextColorPanel;
-  final VoidCallback onBackgroundPressed;
-  final VoidCallback onStickerPressed;
-  final VoidCallback onOverlayImagePressed;
-  final VoidCallback onInlineImagePressed;
-
-  const _CommonToolsRow({
-    super.key,
-    required this.controller,
-    required this.activePanel,
-    required this.onOpenTextFormatPanel,
-    required this.onOpenListPanel,
-    required this.onOpenFontPanel,
-    required this.onOpenTextColorPanel,
-    required this.onBackgroundPressed,
-    required this.onStickerPressed,
-    required this.onOverlayImagePressed,
-    required this.onInlineImagePressed,
-  });
-
-  @override
-  State<_CommonToolsRow> createState() => _CommonToolsRowState();
-}
-
-class _CommonToolsRowState extends State<_CommonToolsRow> {
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_refresh);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_refresh);
-    super.dispose();
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
-  bool _isBlockActive(quill.Attribute attribute) {
-    final style = widget.controller.getSelectionStyle();
-    final current = style.attributes[attribute.key];
-    return current?.value == attribute.value;
-  }
-
-  void _insertDivider() {
-    final index = widget.controller.selection.baseOffset.clamp(
-      0,
-      widget.controller.document.length,
-    );
-    widget.controller.replaceText(
-      index,
-      0,
-      DividerEmbed.instance,
-      TextSelection.collapsed(offset: index + 1),
-    );
-  }
-
-  void _toggleQuote() {
-    final isActive = _isBlockActive(quill.Attribute.blockQuote);
-    widget.controller.formatSelection(
-      isActive
-          ? quill.Attribute.clone(quill.Attribute.blockQuote, null)
-          : quill.Attribute.blockQuote,
-    );
-  }
-
-  void _undo() {
-    widget.controller.undo();
-  }
-
-  void _redo() {
-    widget.controller.redo();
-  }
-
-  bool get _isAnyListActive =>
-      _isBlockActive(quill.Attribute.ul) ||
-      _isBlockActive(quill.Attribute.ol) ||
-      _isBlockActive(quill.Attribute.unchecked) ||
-      _isBlockActive(quill.Attribute.checked);
-
-  bool get _isAnyTextFormatActive {
-    final style = widget.controller.getSelectionStyle();
-    final List<quill.Attribute> tracked = [
-      quill.Attribute.align,
-      quill.Attribute.size,
-      quill.Attribute.bold,
-      quill.Attribute.italic,
-      quill.Attribute.underline,
-    ];
-    return tracked.any((a) => style.attributes.containsKey(a.key));
-  }
-
-  bool get _hasDocumentTextColor {
-    final style = widget.controller.getSelectionStyle();
-    return style.attributes.containsKey(quill.Attribute.color.key);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ToolbarIconButton(
-            icon: Icons.undo_rounded,
-            tooltip: 'Undo',
-            onPressed: widget.controller.hasUndo ? _undo : null,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.redo_rounded,
-            tooltip: 'Redo',
-            onPressed: widget.controller.hasRedo ? _redo : null,
-          ),
-          const _ToolbarDivider(),
-          _ToolbarIconButton(
-            textLabel: 'T',
-            tooltip: 'Text formatting',
-            isActive:
-                widget.activePanel == _ActivePanel.textFormat ||
-                _isAnyTextFormatActive,
-            onPressed: widget.onOpenTextFormatPanel,
-          ),
-          _ToolbarIconButton(
-            textLabel: 'Aa',
-            tooltip: 'Font',
-            isActive: widget.activePanel == _ActivePanel.font,
-            onPressed: widget.onOpenFontPanel,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.format_color_text_rounded,
-            tooltip: 'Text color',
-            isActive:
-                widget.activePanel == _ActivePanel.textColor ||
-                _hasDocumentTextColor,
-            onPressed: widget.onOpenTextColorPanel,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.format_list_bulleted_rounded,
-            tooltip: 'Lists',
-            isActive:
-                widget.activePanel == _ActivePanel.list || _isAnyListActive,
-            onPressed: widget.onOpenListPanel,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.format_quote_rounded,
-            tooltip: 'Quote',
-            isActive: _isBlockActive(quill.Attribute.blockQuote),
-            onPressed: _toggleQuote,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.horizontal_rule_rounded,
-            tooltip: 'Divider',
-            onPressed: _insertDivider,
-          ),
-          const _ToolbarDivider(),
-          _ToolbarIconButton(
-            icon: Icons.image_outlined,
-            tooltip: 'Insert photo',
-            onPressed: widget.onInlineImagePressed,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.photo_size_select_large_sharp,
-            tooltip: 'Floating photo',
-            onPressed: widget.onOverlayImagePressed,
-          ),
-          _ToolbarIconButton(
-            icon: Icons.auto_awesome_outlined,
-            tooltip: 'Sticker',
-            onPressed: widget.onStickerPressed,
-          ),
-          _ToolbarIconButton(
-            icon: CupertinoIcons.layers,
-            tooltip: 'Background',
-            onPressed: widget.onBackgroundPressed,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Text-format panel (opened by "T") — Alignment / Font size / Bold / Italic
-// / Underline ONLY.
-// ---------------------------------------------------------------------------
-
 const List<({String label, String? value})> _fontSizeOptions = [
   (label: 'S', value: '12'),
-  (label: 'M', value: null), // Normal / default
+  (label: 'M', value: null),
   (label: 'L', value: '20'),
   (label: 'XL', value: '28'),
 ];
 
-class _TextFormatPanel extends StatefulWidget {
+class _TextFormatPanel extends StatelessWidget {
   final quill.QuillController controller;
-  final ValueChanged<String> onAlignmentChanged;
+  final ValueListenable<_ToolbarSnapshot> snapshotListenable;
+  final ValueChanged<quill.Attribute> onAlignmentSelected;
   final ValueChanged<bool> onBoldChanged;
   final ValueChanged<bool> onItalicChanged;
   final ValueChanged<bool> onUnderlineChanged;
@@ -775,184 +1165,138 @@ class _TextFormatPanel extends StatefulWidget {
 
   const _TextFormatPanel({
     required this.controller,
-    required this.onAlignmentChanged,
+    required this.snapshotListenable,
+    required this.onAlignmentSelected,
     required this.onBoldChanged,
     required this.onItalicChanged,
     required this.onUnderlineChanged,
     required this.onFontSizeChanged,
   });
 
-  @override
-  State<_TextFormatPanel> createState() => _TextFormatPanelState();
-}
-
-class _TextFormatPanelState extends State<_TextFormatPanel> {
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_refresh);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_refresh);
-    super.dispose();
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
-  String get _currentAlignment {
-    final style = widget.controller.getSelectionStyle();
-    final value = style.attributes[quill.Attribute.align.key]?.value as String?;
-    return value ?? 'left';
-  }
-
-  void _setAlignment(quill.Attribute alignment) {
-    final value = (alignment.value as String?) ?? 'left';
-    if (alignment == quill.Attribute.leftAlignment) {
-      widget.controller.formatSelection(
-        quill.Attribute.clone(quill.Attribute.align, null),
-      );
-    } else {
-      widget.controller.formatSelection(alignment);
-    }
-    widget.onAlignmentChanged(value);
-  }
-
-  String? get _currentFontSize {
-    final style = widget.controller.getSelectionStyle();
-    return style.attributes[quill.Attribute.size.key]?.value as String?;
-  }
-
-  bool _isActive(quill.Attribute attribute) {
-    final style = widget.controller.getSelectionStyle();
-    return style.attributes.containsKey(attribute.key);
-  }
-
-  void _toggle(quill.Attribute attribute) {
-    final isActive = _isActive(attribute);
-    final length = widget.controller.document.length;
+  void _toggle(quill.Attribute attribute, bool isActive) {
+    final length = controller.document.length;
     final nowActive = !isActive;
+    final targetAttr =
+        isActive ? quill.Attribute.clone(attribute, null) : attribute;
     if (length > 0) {
-      widget.controller.formatText(
-        0,
-        length,
-        isActive ? quill.Attribute.clone(attribute, null) : attribute,
-      );
+      controller.formatText(0, length, targetAttr);
     }
+    controller.formatSelection(targetAttr);
+
     if (attribute.key == quill.Attribute.bold.key) {
-      widget.onBoldChanged(nowActive);
+      onBoldChanged(nowActive);
     } else if (attribute.key == quill.Attribute.italic.key) {
-      widget.onItalicChanged(nowActive);
+      onItalicChanged(nowActive);
     } else if (attribute.key == quill.Attribute.underline.key) {
-      widget.onUnderlineChanged(nowActive);
+      onUnderlineChanged(nowActive);
     }
   }
 
   void _applyFontSizeToWholeDocument(String? value) {
-    final length = widget.controller.document.length;
+    final length = controller.document.length;
+    final attr = value == null
+        ? quill.Attribute.clone(quill.Attribute.size, null)
+        : quill.Attribute(
+            quill.Attribute.size.key,
+            quill.AttributeScope.inline,
+            value,
+          );
     if (length > 0) {
-      widget.controller.formatText(
-        0,
-        length,
-        value == null
-            ? quill.Attribute.clone(quill.Attribute.size, null)
-            : quill.Attribute(
-                quill.Attribute.size.key,
-                quill.AttributeScope.inline,
-                value,
-              ),
-      );
+      controller.formatText(0, length, attr);
     }
-    widget.onFontSizeChanged(value);
+    controller.formatSelection(attr);
+    onFontSizeChanged(value);
   }
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _PanelSectionLabel('Alignment'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                for (final alignment in _alignmentCycle)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: _ToolbarIconButton(
-                      icon:
-                          _alignmentIcons[(alignment.value as String?) ??
-                              'left'],
-                      tooltip: (alignment.value as String?) ?? 'left',
-                      isActive:
-                          (alignment.value ?? 'left') == _currentAlignment,
-                      onPressed: () => _setAlignment(alignment),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const _PanelSectionLabel('Font size'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                for (final option in _fontSizeOptions)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: _ToolbarIconButton(
-                      textLabel: option.label,
-                      tooltip: option.label,
-                      isActive: option.value == _currentFontSize,
+    return ValueListenableBuilder<_ToolbarSnapshot>(
+      valueListenable: snapshotListenable,
+      builder: (context, snapshot, _) {
+        return SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _PanelSectionLabel('Alignment'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    for (final alignment in _alignmentCycle)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: _ToolbarIconButton(
+                          icon: _alignmentIcons[
+                              (alignment.value as String?) ?? 'left'],
+                          tooltip: (alignment.value as String?) ?? 'left',
+                          isActive:
+                              (alignment.value ?? 'left') == snapshot.alignment,
+                          onPressed: () => onAlignmentSelected(alignment),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const _PanelSectionLabel('Font size'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    for (final option in _fontSizeOptions)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: _ToolbarIconButton(
+                          textLabel: option.label,
+                          tooltip: option.label,
+                          isActive: option.value == snapshot.fontSize,
+                          onPressed: () =>
+                              _applyFontSizeToWholeDocument(option.value),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const _PanelSectionLabel('Style'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                child: Row(
+                  children: [
+                    _ToolbarIconButton(
+                      icon: Icons.format_bold_rounded,
+                      tooltip: 'Bold',
+                      isActive: snapshot.isBold,
                       onPressed: () =>
-                          _applyFontSizeToWholeDocument(option.value),
+                          _toggle(quill.Attribute.bold, snapshot.isBold),
                     ),
-                  ),
-              ],
-            ),
+                    const SizedBox(width: 4),
+                    _ToolbarIconButton(
+                      icon: Icons.format_italic_rounded,
+                      tooltip: 'Italic',
+                      isActive: snapshot.isItalic,
+                      onPressed: () =>
+                          _toggle(quill.Attribute.italic, snapshot.isItalic),
+                    ),
+                    const SizedBox(width: 4),
+                    _ToolbarIconButton(
+                      icon: Icons.format_underline_rounded,
+                      tooltip: 'Underline',
+                      isActive: snapshot.isUnderline,
+                      onPressed: () => _toggle(
+                        quill.Attribute.underline,
+                        snapshot.isUnderline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const _PanelSectionLabel('Style'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-            child: Row(
-              children: [
-                _ToolbarIconButton(
-                  icon: Icons.format_bold_rounded,
-                  tooltip: 'Bold',
-                  isActive: _isActive(quill.Attribute.bold),
-                  onPressed: () => _toggle(quill.Attribute.bold),
-                ),
-                const SizedBox(width: 4),
-                _ToolbarIconButton(
-                  icon: Icons.format_italic_rounded,
-                  tooltip: 'Italic',
-                  isActive: _isActive(quill.Attribute.italic),
-                  onPressed: () => _toggle(quill.Attribute.italic),
-                ),
-                const SizedBox(width: 4),
-                _ToolbarIconButton(
-                  icon: Icons.format_underline_rounded,
-                  tooltip: 'Underline',
-                  isActive: _isActive(quill.Attribute.underline),
-                  onPressed: () => _toggle(quill.Attribute.underline),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Text color panel - applies to the WHOLE document
-// ---------------------------------------------------------------------------
 
 const List<(AppColorRole role, String label)> _colorRoleOptions = [
   (AppColorRole.text, 'Text'),
@@ -1026,39 +1370,23 @@ class _DocumentColorPanel extends StatefulWidget {
 class _DocumentColorPanelState extends State<_DocumentColorPanel> {
   AppColorRole _selectedRole = AppColorRole.text;
 
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_refresh);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_refresh);
-    super.dispose();
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
   void _applyToWholeDocument(String hex) {
     final length = widget.controller.document.length;
+    final attr = quill.ColorAttribute(hex);
     if (length > 0) {
-      widget.controller.formatText(0, length, quill.ColorAttribute(hex));
+      widget.controller.formatText(0, length, attr);
     }
+    widget.controller.formatSelection(attr);
     widget.onTextColorChanged(hex);
   }
 
   void _clearFromWholeDocument() {
     final length = widget.controller.document.length;
+    final attr = quill.Attribute.clone(quill.Attribute.color, null);
     if (length > 0) {
-      widget.controller.formatText(
-        0,
-        length,
-        quill.Attribute.clone(quill.Attribute.color, null),
-      );
+      widget.controller.formatText(0, length, attr);
     }
+    widget.controller.formatSelection(attr);
     widget.onTextColorChanged(null);
   }
 
@@ -1174,99 +1502,63 @@ class _ClearColorSwatch extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// List panel (opened by the bullet button)
-// ---------------------------------------------------------------------------
-
-class _ListPanel extends StatefulWidget {
+class _ListPanel extends StatelessWidget {
   final quill.QuillController controller;
-
-  /// Called once a list style has been applied, so the host page
-  /// knows to dismiss the panel — mirrors how this panel used to call
-  /// `Navigator.of(context).pop()` on itself when it was a routed
-  /// sheet. Since this panel is no longer hosted inside its own route,
-  /// it has no `Navigator` of its own to pop; closing is entirely the
-  /// host page's call now.
+  final ValueListenable<_ToolbarSnapshot> snapshotListenable;
   final VoidCallback onDone;
 
-  const _ListPanel({required this.controller, required this.onDone});
+  const _ListPanel({
+    required this.controller,
+    required this.snapshotListenable,
+    required this.onDone,
+  });
 
-  @override
-  State<_ListPanel> createState() => _ListPanelState();
-}
-
-class _ListPanelState extends State<_ListPanel> {
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_refresh);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_refresh);
-    super.dispose();
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
-  bool _isActive(quill.Attribute attribute) {
-    final style = widget.controller.getSelectionStyle();
-    final current = style.attributes[attribute.key];
-    return current?.value == attribute.value;
-  }
-
-  /// Applies the style then tells the host page to dismiss the panel
-  /// — unlike the T/Font/Text-color panels (which stay open across
-  /// several taps), picking a list style is a single, complete action,
-  /// so closing right away matches how Quote/Divider already behave.
-  void _toggleAndClose(quill.Attribute attribute) {
-    final isActive = _isActive(attribute);
-    widget.controller.formatSelection(
+  void _toggleAndClose(quill.Attribute attribute, bool isActive) {
+    controller.formatSelection(
       isActive ? quill.Attribute.clone(attribute, null) : attribute,
     );
-    widget.onDone();
+    onDone();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sm),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ListOptionRow(
-            icon: Icons.format_list_bulleted_rounded,
-            label: 'Bullet list',
-            isActive: _isActive(quill.Attribute.ul),
-            onTap: () => _toggleAndClose(quill.Attribute.ul),
+    return ValueListenableBuilder<_ToolbarSnapshot>(
+      valueListenable: snapshotListenable,
+      builder: (context, snapshot, _) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: ThemeSpacing.sm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ListOptionRow(
+                icon: Icons.format_list_bulleted_rounded,
+                label: 'Bullet list',
+                isActive: snapshot.isUl,
+                onTap: () => _toggleAndClose(quill.Attribute.ul, snapshot.isUl),
+              ),
+              _ListOptionRow(
+                icon: Icons.format_list_numbered_rounded,
+                label: 'Numbered list',
+                isActive: snapshot.isOl,
+                onTap: () => _toggleAndClose(quill.Attribute.ol, snapshot.isOl),
+              ),
+              _ListOptionRow(
+                icon: Icons.checklist_rounded,
+                label: 'Checklist',
+                isActive: snapshot.isChecklist,
+                onTap: () => _toggleAndClose(
+                  quill.Attribute.unchecked,
+                  snapshot.isChecklist,
+                ),
+              ),
+            ],
           ),
-          _ListOptionRow(
-            icon: Icons.format_list_numbered_rounded,
-            label: 'Numbered list',
-            isActive: _isActive(quill.Attribute.ol),
-            onTap: () => _toggleAndClose(quill.Attribute.ol),
-          ),
-          _ListOptionRow(
-            icon: Icons.checklist_rounded,
-            label: 'Checklist',
-            isActive:
-                _isActive(quill.Attribute.unchecked) ||
-                _isActive(quill.Attribute.checked),
-            onTap: () => _toggleAndClose(quill.Attribute.unchecked),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-/// A single selectable row inside [_ListPanel] — a rounded, softly
-/// highlighted card when active rather than a flat, full-bleed
-/// [ListTile], matching the pill-shaped active state every other
-/// button in this toolbar uses.
 class _ListOptionRow extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1326,84 +1618,48 @@ class _ListOptionRow extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Selection tools row (text selected)
-// ---------------------------------------------------------------------------
-
-class _SelectionToolsRow extends StatefulWidget {
-  final quill.QuillController controller;
+class _SelectionToolsRow extends StatelessWidget {
+  final _ToolbarSnapshot snapshot;
   final _ActivePanel activePanel;
   final VoidCallback onOpenStylePicker;
   final void Function({required bool isHighlight}) onOpenColorPanel;
 
   const _SelectionToolsRow({
     super.key,
-    required this.controller,
+    required this.snapshot,
     required this.activePanel,
     required this.onOpenStylePicker,
     required this.onOpenColorPanel,
   });
 
   @override
-  State<_SelectionToolsRow> createState() => _SelectionToolsRowState();
-}
-
-class _SelectionToolsRowState extends State<_SelectionToolsRow> {
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_refresh);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_refresh);
-    super.dispose();
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
-  bool get _hasAnyCharacterStyleExcludingColor {
-    final style = widget.controller.getSelectionStyle();
-    final List<quill.Attribute> boolAttributes = [
-      quill.Attribute.bold,
-      quill.Attribute.italic,
-      quill.Attribute.underline,
-      quill.Attribute.strikeThrough,
-    ];
-    return boolAttributes.any((a) => style.attributes.containsKey(a.key));
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final colorPanelOpen = widget.activePanel == _ActivePanel.selectionColor;
+    final colorPanelOpen = activePanel == _ActivePanel.selectionColor;
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           _ToolbarIconButton(
             icon: Icons.text_format_rounded,
             tooltip: 'Text style (bold, italic, underline, strikethrough)',
-            isActive: _hasAnyCharacterStyleExcludingColor,
-            onPressed: widget.onOpenStylePicker,
+            isActive: snapshot.hasAnyCharacterStyleExcludingColor,
+            onPressed: onOpenStylePicker,
           ),
           const _ToolbarDivider(),
           _ToolbarIconButton(
             icon: Icons.format_color_text_rounded,
             tooltip: 'Text color',
             isActive: colorPanelOpen,
-            onPressed: () => widget.onOpenColorPanel(isHighlight: false),
+            onPressed: () => onOpenColorPanel(isHighlight: false),
           ),
           _ToolbarIconButton(
             icon: Icons.format_color_fill_rounded,
             tooltip: 'Highlight color',
             isActive: colorPanelOpen,
-            onPressed: () => widget.onOpenColorPanel(isHighlight: true),
+            onPressed: () => onOpenColorPanel(isHighlight: true),
           ),
         ],
       ),
@@ -1573,10 +1829,6 @@ class _FontColorPanelState extends State<_FontColorPanel> {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Divider embed
-// ---------------------------------------------------------------------------
 
 class DividerEmbed extends quill.CustomBlockEmbed {
   static const String dividerType = 'divider';
