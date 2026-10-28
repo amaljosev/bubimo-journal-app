@@ -1,10 +1,13 @@
 // lib/features/backgrounds/presentation/widgets/background_picker_widget.dart
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/di/injection.dart';
@@ -67,6 +70,7 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
   final MediaStorageService _mediaStorageService = getIt<MediaStorageService>();
 
   bool _isPicking = false;
+  bool _isCropping = false;
 
   @override
   void initState() {
@@ -80,6 +84,73 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
     super.dispose();
   }
 
+  /// `image_cropper` only ships Android, iOS and Web implementations, and
+  /// this widget's file handling (`dart:io`) is not web-ready, so cropping
+  /// runs on Android/iOS only. Everywhere else the original flow is kept.
+  bool get _isCropSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  /// Opens the native cropper locked to the current screen's aspect ratio
+  /// (width : height of the window, so it adapts to every device and to
+  /// rotation / split-screen). Returns the cropped file's path, or null if
+  /// the user cancelled.
+  Future<String?> _cropToScreenRatio(String sourcePath) async {
+    // Read everything that needs `context` before the first await.
+    final screen = MediaQuery.sizeOf(context);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: sourcePath,
+      // Passing an aspectRatio locks the crop box to it.
+      aspectRatio: CropAspectRatio(
+        ratioX: screen.width,
+        ratioY: screen.height,
+      ),
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: 'Crop background',
+          toolbarColor: colorScheme.primary,
+          toolbarWidgetColor: colorScheme.onPrimary,
+          activeControlsWidgetColor: colorScheme.primary,
+          lockAspectRatio: true,
+          // Hides the bottom controls (ratio menu, rotate, scale wheel).
+          hideBottomControls: true,
+        ),
+        IOSUiSettings(
+          title: 'Crop background',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+          aspectRatioPickerButtonHidden: true,
+        ),
+      ],
+    );
+    return cropped?.path;
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Crops [sourcePath], stores the result durably and reports it as a
+  /// user-owned image. Does nothing if the user cancels the crop, so the
+  /// picker sheet simply stays open.
+  Future<void> _cropSaveAndSelect(String sourcePath) async {
+    final croppedPath = await _cropToScreenRatio(sourcePath);
+    if (croppedPath == null) return;
+
+    final savedPath = await _mediaStorageService.saveFile(
+      File(croppedPath),
+      category: MediaCategory.diaryBackgrounds,
+    );
+    if (!mounted) return;
+    widget.onSelected(
+      SelectedBackground(type: BackgroundSourceType.gallery, path: savedPath),
+    );
+  }
+
   Future<void> _pickFromGallery() async {
     if (_isPicking) return;
     _isPicking = true;
@@ -87,6 +158,11 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
     try {
       final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
       if (picked == null) return;
+
+      if (_isCropSupported) {
+        await _cropSaveAndSelect(picked.path);
+        return;
+      }
 
       final savedPath = await _mediaStorageService.saveFile(
         File(picked.path),
@@ -99,13 +175,37 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
         ),
       );
     } on MediaStorageException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save image: ${e.message}')),
-        );
-      }
+      _showSnack('Could not save image: ${e.message}');
+    } catch (_) {
+      _showSnack('Could not crop image. Please try again.');
     } finally {
       _isPicking = false;
+    }
+  }
+
+  /// A preset finished downloading. The downloaded file is shared and
+  /// reused, so it is never modified: the crop is written to a new file.
+  Future<void> _onPresetDownloaded(String localPath) async {
+    if (!_isCropSupported) {
+      widget.onSelected(
+        SelectedBackground(
+          type: BackgroundSourceType.presetRemote,
+          path: localPath,
+        ),
+      );
+      return;
+    }
+
+    if (_isCropping) return;
+    _isCropping = true;
+    try {
+      await _cropSaveAndSelect(localPath);
+    } on MediaStorageException catch (e) {
+      _showSnack('Could not save image: ${e.message}');
+    } catch (_) {
+      _showSnack('Could not crop image. Please try again.');
+    } finally {
+      _isCropping = false;
     }
   }
 
@@ -124,12 +224,7 @@ class _BackgroundPickerWidgetState extends State<BackgroundPickerWidget>
         listener: (context, state) {
           final downloaded = state.downloaded;
           if (downloaded != null) {
-            widget.onSelected(
-              SelectedBackground(
-                type: BackgroundSourceType.presetRemote,
-                path: downloaded.localPath,
-              ),
-            );
+            unawaited(_onPresetDownloaded(downloaded.localPath));
           } else if (state.downloadFailed) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(

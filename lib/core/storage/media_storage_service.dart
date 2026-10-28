@@ -217,26 +217,66 @@ class MediaStorageService {
 
   /// Writes raw [bytes] (e.g. a downloaded sticker/background, or a
   /// file extracted from an import bundle) into the app-owned directory
-  /// for [category], under a newly generated unique filename with the
-  /// given [extension] (pass with or without a leading dot — both
-  /// accepted), and returns the saved file's absolute path.
+  /// for [category] and returns the saved file's absolute path.
   ///
-  /// Throws [MediaStorageException] if the write fails.
+  /// By default the file gets a newly generated unique filename with
+  /// the given [extension] (pass with or without a leading dot — both
+  /// accepted).
+  ///
+  /// Pass [fileName] to store the file under that exact name instead
+  /// (e.g. the remote file name of a downloaded preset), so
+  /// [findExistingByFileName] can find it again later. [extension] is
+  /// ignored in that case. [fileName] must be a plain file name — no
+  /// directory parts. An existing file with the same name is replaced.
+  ///
+  /// The bytes are written to a temporary file and renamed into place,
+  /// so a crash or failure mid-write never leaves a truncated file under
+  /// the final name.
+  ///
+  /// Throws [MediaStorageException] if the write fails or [fileName] is
+  /// not a plain file name.
   Future<String> saveBytes(
     Uint8List bytes, {
     required MediaCategory category,
     required String extension,
+    String? fileName,
   }) async {
     try {
+      if (fileName != null &&
+          (fileName.isEmpty ||
+              fileName != p.basename(fileName) ||
+              fileName == '.' ||
+              fileName == '..')) {
+        throw MediaStorageException(
+          message: 'Invalid media file name: "$fileName"',
+        );
+      }
+
       final directory = await directoryFor(category);
       final normalizedExtension = extension.startsWith('.')
           ? extension
           : '.$extension';
-      final fileName = _generateFileName(extension: normalizedExtension);
-      final destination = File(p.join(directory.path, fileName));
+      final finalName =
+          fileName ?? _generateFileName(extension: normalizedExtension);
+      final destination = File(p.join(directory.path, finalName));
 
-      await destination.writeAsBytes(bytes);
+      final temp = File(
+        p.join(
+          directory.path,
+          '$finalName.${DateTime.now().microsecondsSinceEpoch}$_tempSuffix',
+        ),
+      );
+      try {
+        await temp.writeAsBytes(bytes, flush: true);
+        await temp.rename(destination.path);
+      } finally {
+        if (await temp.exists()) {
+          await temp.delete();
+        }
+      }
       return destination.path;
+    } on MediaStorageException {
+      rethrow;
     } catch (e) {
       throw MediaStorageException(
         message: 'Failed to save media bytes into $category: $e',
@@ -268,32 +308,37 @@ class MediaStorageService {
     }
   }
 
-  /// Looks for a file already saved under [category] whose saved
-  /// filename ends in [remoteFileName] (the filename portion of the
-  /// original download URL), returning its path if found.
+  /// Returns the path of the non-empty file in [category] whose name is
+  /// exactly [remoteFileName], or null if there is none.
   ///
-  /// [saveBytes]/[saveFile] always generate a fresh timestamped name
-  /// (see [_generateFileName]) rather than reusing the source's own
-  /// filename, so a previously downloaded file can't be found by
-  /// constructing its expected path directly — this does a directory
-  /// scan instead. Used by callers that download-and-cache remote
-  /// files keyed by a stable remote name (e.g.
-  /// [SupabaseStorageAssetService.downloadAndCache]) to skip re-
-  /// downloading something already fetched in a prior session.
+  /// Only files saved with [saveBytes]'s `fileName` parameter can be
+  /// found this way; files saved under a generated name (the default of
+  /// [saveBytes] and [saveFile]) never match. Used by callers that
+  /// download-and-cache remote files keyed by a stable remote name (e.g.
+  /// [SupabaseStorageAssetService.downloadAndCache]) to skip
+  /// re-downloading something already fetched in a prior session.
+  ///
+  /// The match is exact on purpose: a suffix match would treat
+  /// `13.webp` as a hit for `3.webp`.
   Future<String?> findExistingByFileName(
     String remoteFileName, {
     required MediaCategory category,
   }) async {
-    final directory = await directoryFor(category);
-    if (!await directory.exists()) return null;
+    if (remoteFileName.isEmpty ||
+        remoteFileName != p.basename(remoteFileName)) {
+      return null;
+    }
 
-    await for (final entity in directory.list()) {
-      if (entity is File && entity.path.endsWith(remoteFileName)) {
-        return entity.path;
-      }
+    final directory = await directoryFor(category);
+    final file = File(p.join(directory.path, remoteFileName));
+    if (await file.exists() && await file.length() > 0) {
+      return file.path;
     }
     return null;
   }
+
+  /// Suffix of in-progress writes (see [saveBytes]).
+  static const String _tempSuffix = '.tmp';
 
   /// Generates a filename unique enough to never collide within this
   /// app: millisecond timestamp + a short random suffix. Avoids taking

@@ -44,6 +44,10 @@ class SupabaseStorageAssetService {
   /// under [category], returning the durable local path. Skips the
   /// download if already cached from a previous fetch.
   ///
+  /// The file is stored under its remote file name (e.g. `3.webp`) and
+  /// looked up by that exact name, so the same URL always maps to the
+  /// same local file and never to a different one.
+  ///
   /// Previously wrote directly to
   /// `<app documents>/<cacheSubfolder>/` via raw `dart:io`, bypassing
   /// [MediaStorageService] entirely — same underlying issue as every
@@ -77,6 +81,7 @@ class SupabaseStorageAssetService {
       response.bodyBytes,
       category: category,
       extension: _extensionFromFileName(fileName),
+      fileName: fileName,
     );
   }
 

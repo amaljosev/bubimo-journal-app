@@ -3,15 +3,17 @@
 import 'dart:developer' as developer;
 import 'dart:io';
 
+import 'package:bubimo/features/diary_entry/presentation/bloc/sticker_picker/sticker_picker_bloc.dart';
+import 'package:bubimo/features/diary_entry/presentation/bloc/sticker_picker/sticker_picker_event.dart';
+import 'package:bubimo/features/diary_entry/presentation/bloc/sticker_picker/sticker_picker_state.dart';
+import 'package:bubimo/features/diary_entry/presentation/widgets/minimal_tab_bar.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../core/di/injection.dart';
-import '../../bloc/sticker_picker/sticker_picker_bloc.dart';
-import '../../bloc/sticker_picker/sticker_picker_event.dart';
-import '../../bloc/sticker_picker/sticker_picker_state.dart';
+
 
 /// Opens the sticker picker bottom sheet and returns the URL of the
 /// sticker the user tapped, or `null` if they dismissed it without
@@ -226,25 +228,18 @@ class _CategoryTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final categories = categoriesByName.keys.toList();
 
     return DefaultTabController(
       length: categories.length,
       child: Column(
         children: [
-          SizedBox(
-            height: 48,
-            child: TabBar(
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              tabs: categories.map((cat) => Tab(text: cat)).toList(),
-              labelStyle: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-              indicatorSize: TabBarIndicatorSize.label,
-            ),
-          ),
+          // Small breathing room under the sheet's top edge. The tab
+          // bar's first label starts at the same 16 px as the grid below.
+          const SizedBox(height: 8),
+          // Reads the DefaultTabController above it, so swiping the
+          // TabBarView and tapping a tab stay in sync.
+          MinimalTabBar(labels: categories),
           Expanded(
             child: TabBarView(
               children: categories.map((category) {

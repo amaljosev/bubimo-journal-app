@@ -17,7 +17,7 @@ import 'package:bubimo/features/diary_entry/presentation/widgets/diary_form/diar
 import 'package:bubimo/features/diary_entry/presentation/widgets/mood_popover.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/overlay/overlay_layer.dart';
 import 'package:bubimo/features/diary_entry/presentation/widgets/overlay/resizable_image_embed_builder.dart';
-import 'package:bubimo/features/diary_entry/presentation/widgets/overlay/sticker_picker_sheet.dart';
+import 'package:bubimo/features/diary_entry/presentation/widgets/sticker_picker_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
@@ -1099,7 +1099,19 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
     if (!await _ensureOnline()) return;
     if (!context.mounted) return;
 
-    final selection = await showBackgroundPickerSheet(context);
+    // Only a preset that is actually the entry's current background gets
+    // highlighted: a gallery or bundled image takes precedence over
+    // `bgLocalPath` (see BackgroundImageUtils.resolveProvider).
+    final current = _bloc.state;
+    final currentPresetPath =
+        current.bgGalleryImagePath == null && current.bgImagePath == null
+        ? current.bgLocalPath
+        : null;
+
+    final selection = await showBackgroundPickerSheet(
+      context,
+      currentPresetPath: currentPresetPath,
+    );
     if (selection == null) return;
 
     switch (selection.type) {
@@ -1108,7 +1120,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
         final exists = path != null && File(path).existsSync();
         debugPrint('[Background] preset path=$path exists=$exists');
         if (!exists) {
-          if (mounted) {
+          if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Background file was not saved.')),
             );
