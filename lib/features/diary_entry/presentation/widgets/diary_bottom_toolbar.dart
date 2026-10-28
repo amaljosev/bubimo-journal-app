@@ -1,5 +1,7 @@
 // lib/features/diary_entry/presentation/widgets/diary_bottom_toolbar.dart
 
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
@@ -65,6 +67,11 @@ class DiaryPanelRequest {
 /// Every panel (T, Font, Text color, Lists, and the selection row's
 /// color panel and style picker) is requested via [onPanelRequested]
 /// and rendered by the host page — see [DiaryPanelRequest] for why.
+///
+/// Every button that opens a panel, sheet or picker is protected by a
+/// short tap lock (see [DiaryBottomToolbarState._guardedTap]) so a fast
+/// double-tap can't open the same thing twice. Instant actions (Undo,
+/// Redo, Quote, Divider, closing a panel) are intentionally not locked.
 class DiaryBottomToolbar extends StatefulWidget {
   final quill.QuillController controller;
   final FocusNode editorFocusNode;
@@ -154,7 +161,19 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   /// always-visible bar.
   static const double totalHeight = _barHeight + 20;
 
+  /// How long repeat taps on panel/sheet buttons are ignored after the
+  /// first one goes through. Long enough to cover the keyboard-close +
+  /// panel-open animation, short enough that a deliberate second tap
+  /// still feels responsive.
+  static const Duration _tapLockDuration = Duration(milliseconds: 600);
+
   _ActivePanel _activePanel = _ActivePanel.none;
+
+  /// Active while the tap lock is engaged. A plain [Timer] is used
+  /// instead of a bool + setState because the lock has no visual
+  /// effect, so nothing needs to rebuild when it engages or releases.
+  Timer? _tapLockTimer;
+  bool get _isTapLocked => _tapLockTimer?.isActive ?? false;
 
   // Only selection changes (collapsed <-> expanded) need to rebuild
   // this widget to swap rows; every other controller change (typing,
@@ -180,6 +199,7 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
 
   @override
   void dispose() {
+    _tapLockTimer?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     super.dispose();
   }
@@ -194,6 +214,25 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     }
   }
 
+  /// Runs [action] unless another guarded tap already went through
+  /// within [_tapLockDuration].
+  ///
+  /// PROBLEM THIS FIXES: tapping a panel/sheet button quickly several
+  /// times fired its callback several times before the first panel had
+  /// finished opening, so the same panel/sheet was requested (and
+  /// stacked) multiple times.
+  ///
+  /// The lock is deliberately shared by every guarded button in this
+  /// toolbar: while one panel/sheet is opening, a tap on a *different*
+  /// panel button would just fight it for the same keyboard footprint,
+  /// so ignoring it is correct. Instant actions (Undo, Redo, Quote,
+  /// Divider) and [closeActivePanel] do not go through this guard.
+  void _guardedTap(VoidCallback action) {
+    if (_isTapLocked) return;
+    _tapLockTimer = Timer(_tapLockDuration, () {});
+    action();
+  }
+
   /// Tells the host page to show [content], tracking [panel] as the
   /// active one for this toolbar's own button-highlight state.
   ///
@@ -203,20 +242,29 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   /// do that *before* this is even called (the height has to be read
   /// while the keyboard is still up). See
   /// `_DiaryFormViewState._openPanel` in diary_form_page.dart.
+  ///
+  /// Guarded by [_guardedTap], so every panel-opening button (T, Aa,
+  /// text color, lists, style picker, selection color/highlight) is
+  /// protected against rapid repeat taps from this one place.
   void _requestPanel(
     _ActivePanel panel,
     WidgetBuilder builder, {
     required bool refocusOnClose,
   }) {
-    setState(() => _activePanel = panel);
-    widget.onPanelRequested(
-      DiaryPanelRequest(content: builder, refocusOnClose: refocusOnClose),
-    );
+    _guardedTap(() {
+      setState(() => _activePanel = panel);
+      widget.onPanelRequested(
+        DiaryPanelRequest(content: builder, refocusOnClose: refocusOnClose),
+      );
+    });
   }
 
   /// Tells the host page to dismiss whatever panel is currently open,
   /// clearing this toolbar's own active-panel tracking to match.
   /// Safe to call even when nothing is open.
+  ///
+  /// Intentionally NOT guarded: the user (or a panel closing itself,
+  /// like [_ListPanel]) must always be able to dismiss a panel.
   void closeActivePanel() {
     if (_activePanel == _ActivePanel.none) return;
     setState(() => _activePanel = _ActivePanel.none);
@@ -351,7 +399,6 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
               ),
               child: SizedBox(
                 height: _barHeight,
-        
                 child: AnimatedSwitcher(
                   duration: ThemeDurations.fast,
                   switchInCurve: Curves.easeOut,
@@ -372,10 +419,17 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
                           onOpenListPanel: _openListPanel,
                           onOpenFontPanel: _openFontPanel,
                           onOpenTextColorPanel: _openTextColorPanel,
-                          onBackgroundPressed: widget.onBackgroundPressed,
-                          onStickerPressed: widget.onStickerPressed,
-                          onOverlayImagePressed: widget.onOverlayImagePressed,
-                          onInlineImagePressed: widget.onInlineImagePressed,
+                          // These four hand off to the host page, which
+                          // opens its own sheets/pickers, so they share
+                          // the same tap lock as the panel buttons.
+                          onBackgroundPressed: () =>
+                              _guardedTap(widget.onBackgroundPressed),
+                          onStickerPressed: () =>
+                              _guardedTap(widget.onStickerPressed),
+                          onOverlayImagePressed: () =>
+                              _guardedTap(widget.onOverlayImagePressed),
+                          onInlineImagePressed: () =>
+                              _guardedTap(widget.onInlineImagePressed),
                         ),
                 ),
               ),
