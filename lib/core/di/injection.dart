@@ -108,8 +108,6 @@ import '../../features/cloud_backup/data/repositories/cloud_backup_repository_im
 import '../../features/cloud_backup/domain/repositories/cloud_backup_repository.dart';
 import '../../features/cloud_backup/presentation/bloc/cloud_backup_bloc.dart';
 
-// rich_editor (remote stickers)
-
 // reminders
 import '../../features/reminders/data/datasources/local_notification_service.dart';
 import '../../features/reminders/domain/usecases/cancel_reminder.dart';
@@ -150,15 +148,6 @@ final GetIt getIt = GetIt.instance;
 
 /// Registers every dependency the app needs, using manual GetIt
 /// registration (no build_runner / injectable codegen).
-///
-/// Call this once, before `runApp` — see `main.dart`. Assumes
-/// `Supabase.initialize(...)` has already run before this is called,
-/// since the backgrounds feature registers a `SupabaseClient` here.
-///
-/// This file is updated incrementally as each milestone adds new
-/// datasources, repositories, use cases, and blocs/cubits — never
-/// regenerated from scratch. New registrations are always added AFTER
-/// the bloc/use case classes they reference already exist.
 Future<void> configureDependencies() async {
   // --- Core ---
   getIt.registerLazySingleton<AppDatabase>(() => AppDatabase());
@@ -166,32 +155,20 @@ Future<void> configureDependencies() async {
   // Ensure the database is opened before any feature tries to use it.
   await getIt<AppDatabase>().database;
 
-  // Single app-wide entry point for turning a picked/cropped file or a
-  // block of downloaded bytes into a durable, app-owned file. Every
-  // feature that accepts a photo (diary_entry, profile, theme) depends
-  // on this the same way every feature depends on AppDatabase for rows
-  // — see media_storage_service.dart's doc comment for why storing the
-  // raw image_picker/image_cropper path directly is unsafe.
   getIt.registerLazySingleton<MediaStorageService>(
     () => const MediaStorageService(),
   );
 
-  // Single app-wide connectivity checker — shared by cloud backup,
-  // Google Fonts fetching (SafeFontService, just below), and, next,
-  // the Supabase-backed stickers/backgrounds pickers. See
-  // NetworkInfo's doc comment for why a real reachability check (not
-  // just device radio state) is used.
   getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl());
 
-  // Owns every Google Font this app touches — built-in theme fonts
-  // and the shared GoogleFontsCatalog (custom-theme Font Picker AND
-  // the rich-text editor's font picker). Lazy singleton (not a
-  // factory): its in-memory "known-good fonts" registry and its
-  // background retry timer both need to persist for the app's entire
-  // lifetime, same reasoning as AppThemeCubit just below. See
-  // SafeFontService's doc comment for why this exists.
   getIt.registerLazySingleton(
     () => SafeFontService(networkInfo: getIt<NetworkInfo>()),
+  );
+
+  // In-app review service — singleton so the `_isRequesting` guard and
+  // NetworkInfo dependency are shared app-wide.
+  getIt.registerLazySingleton<ReviewPromptService>(
+    () => ReviewPromptService(networkInfo: getIt<NetworkInfo>()),
   );
 
   // --- diary_entry ---
@@ -220,10 +197,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- backup (Import & Export) ---
-  // Depends on DiaryLocalDataSource (registered just above) and
-  // MediaStorageService (registered under --- Core ---) — both must be
-  // registered before this block runs, hence its placement here rather
-  // than alongside an alphabetically-later feature.
   getIt.registerLazySingleton<BackupLocalDataSource>(
     () => BackupLocalDataSource(
       diaryLocalDataSource: getIt<DiaryLocalDataSource>(),
@@ -239,12 +212,6 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => ImportDiaryBackup(getIt<BackupRepository>()),
   );
-  // "Download as PDF" — a separate, one-way, human-readable export.
-  // Depends only on DiaryLocalDataSource, not on BackupLocalDataSource/
-  // BackupRepository, since it doesn't read or write `.bubimo` bundles
-  // at all — see PdfExportRepository's doc comment for why this is a
-  // distinct repository rather than a third method bolted onto
-  // BackupRepository.
   getIt.registerLazySingleton<PdfExportDataSource>(
     () => PdfExportDataSource(getIt<DiaryLocalDataSource>()),
   );
@@ -254,9 +221,6 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => ExportDiaryPdf(getIt<PdfExportRepository>()),
   );
-  // "Download as TXT" — the plain-text sibling of the PDF export above.
-  // Same dependency shape (DiaryLocalDataSource only) and same reasoning
-  // for being its own repository rather than a method on another one.
   getIt.registerLazySingleton<TextExportDataSource>(
     () => TextExportDataSource(getIt<DiaryLocalDataSource>()),
   );
@@ -266,17 +230,12 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => ExportDiaryText(getIt<TextExportRepository>()),
   );
-  // Factory, not singleton — same reasoning as DiaryFormBloc just
-  // above: a fresh instance per visit to the page, not one shared
-  // instance whose stale exportResult/importResult could leak into a
-  // later, unrelated visit.
   getIt.registerFactory(
     () => BackupBloc(
       exportDiaryBackup: getIt<ExportDiaryBackup>(),
       importDiaryBackup: getIt<ImportDiaryBackup>(),
     ),
   );
-  // Export Diary screen (PDF + TXT) — factory for the same reason.
   getIt.registerFactory(
     () => ExportBloc(
       exportDiaryPdf: getIt<ExportDiaryPdf>(),
@@ -285,11 +244,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- diary_entry (stickers) ---
-  // Assumes Supabase.initialize(...) has already run in main(). The
-  // SupabaseClient singleton is registered once here and reused by the
-  // backgrounds feature below — registration order doesn't matter for
-  // lazy singletons (resolved on first use), but it's registered here
-  // since stickers are the first section that needs it.
   getIt.registerLazySingleton<SupabaseClient>(() => Supabase.instance.client);
   getIt.registerLazySingleton(
     () => SupabaseStickerDataSource(getIt<SupabaseClient>()),
@@ -297,13 +251,9 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<StickerRepository>(
     () => StickerRepositoryImpl(getIt<SupabaseStickerDataSource>()),
   );
-  // Offline seed for the first sticker category — same JSON-file
-  // approach as BackgroundPresetCacheDataSource, for consistency.
   getIt.registerLazySingleton<StickerCacheDataSource>(
     () => JsonFileStickerCacheDataSource(),
   );
-  // Factory (not singleton) — a fresh StickerPickerBloc is created each
-  // time the picker sheet opens, mirroring BackgroundPickerBloc.
   getIt.registerFactory(
     () => StickerPickerBloc(
       stickerRepository: getIt<StickerRepository>(),
@@ -334,8 +284,6 @@ Future<void> configureDependencies() async {
     () => DeleteCustomTheme(getIt<ThemeRepository>()),
   );
 
-  // AppThemeCubit is a lazy singleton (not a factory) — it must persist
-  // for the app's entire lifetime since it drives MaterialApp's theme.
   getIt.registerLazySingleton(
     () => AppThemeCubit(
       getSelectedTheme: getIt<GetSelectedTheme>(),
@@ -361,13 +309,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- analytics ---
-  // Individual per-metric use cases are still registered (kept as thin
-  // wrappers around shared pure calculation functions — see each
-  // Get*'s doc comment) for any call site or test that wants just one
-  // metric. AnalyticsBloc itself depends only on GetAnalyticsSnapshot,
-  // which does a SINGLE getAllDiaryEntries() fetch and derives every
-  // metric from that one result, instead of the previous pattern of 5
-  // independent use cases each re-fetching every entry from scratch.
   getIt.registerLazySingleton(() => GetMoodCounts(getIt<GetAllDiaryEntries>()));
   getIt.registerLazySingleton(
     () => GetCurrentStreak(getIt<GetAllDiaryEntries>()),
@@ -391,9 +332,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- profile ---
-  // Backs the combined Profile & Analytics screen's profile section
-  // (photo, username, diary name, header image). AnalyticsBloc above
-  // is reused as-is for that screen's analytics section.
   getIt.registerLazySingleton<ProfileLocalDataSource>(
     () => ProfileLocalDataSourceImpl(getIt<AppDatabase>()),
   );
@@ -413,12 +351,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- backgrounds ---
-  // SupabaseClient is registered above (diary_entry stickers section).
-  // The cache, data source and repository are lazy singletons on
-  // purpose: the repository's in-flight request tracking and the cache's
-  // in-memory copy must be shared by every picker open and by the
-  // prefetch fired from the diary form. Only the bloc is a factory —
-  // a fresh one per sheet open.
   getIt.registerLazySingleton<BackgroundCacheDataSource>(
     () => JsonFileBackgroundCacheDataSource(),
   );
@@ -445,24 +377,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- cloud_backup ---
-  // GoogleAuthDataSource is a lazy singleton — it tracks the current
-  // signed-in account itself (via google_sign_in's authenticationEvents
-  // stream), so it must persist for the app's lifetime rather than
-  // being recreated per bloc instance, or every new CloudBackupBloc
-  // would forget who's signed in.
-  //
-  // CloudBackupLocalDataSource persists just the signed-in account's
-  // email via SharedPreferences, so `CloudBackupRepositoryImpl` can
-  // skip the native Google sign-in call entirely on repeat visits to
-  // the Cloud Backup screen when nothing has ever been linked (or the
-  // user explicitly signed out) — see its doc comment and
-  // `CloudBackupRepository.restoreSession`.
-  //
-  // Depends on BackupLocalDataSource (registered under
-  // --- backup (Import & Export) --- above) — cloud backup reuses that
-  // exact archive-building/import logic rather than re-implementing
-  // entry/media serialization a second time. See
-  // CloudBackupRepositoryImpl's doc comment.
   getIt.registerLazySingleton(() => GoogleAuthDataSource());
   getIt.registerLazySingleton(
     () => GoogleDriveDataSource(getIt<GoogleAuthDataSource>()),
@@ -477,8 +391,6 @@ Future<void> configureDependencies() async {
       networkInfo: getIt<NetworkInfo>(),
     ),
   );
-  // Factory — fresh per visit, same reasoning as BackupBloc: a stale
-  // currentBackup/message shouldn't leak into a later, unrelated visit.
   getIt.registerFactory(
     () => CloudBackupBloc(repository: getIt<CloudBackupRepository>()),
   );
@@ -496,21 +408,9 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => CancelReminder(getIt<LocalNotificationService>()),
   );
-  // CheckReminderPermissions needs LocalNotificationService: its
-  // exact-alarm status check goes through
-  // LocalNotificationService.canScheduleExactAlarms() rather than
-  // permission_handler directly — permission_handler's
-  // Permission.scheduleExactAlarm.status has a filed upstream bug
-  // where it can report granted even when the OS has it denied (see
-  // that use case's doc comment). Notification-permission status
-  // still goes through permission_handler as normal.
   getIt.registerLazySingleton(
     () => CheckReminderPermissions(getIt<LocalNotificationService>()),
   );
-  // RequestReminderPermissions ALSO needs LocalNotificationService, for
-  // the same reason plus its own exact-alarm request — same dependency
-  // LocalNotificationService's own constructor already registered
-  // above, so no new registration is needed for it.
   getIt.registerLazySingleton(
     () => RequestReminderPermissions(getIt<LocalNotificationService>()),
   );
@@ -526,12 +426,6 @@ Future<void> configureDependencies() async {
   );
 
   // --- app_lock ---
-  // Reuses the shared app_settings singleton row/table (see
-  // AppSettingsTable) rather than a separate database or
-  // flutter_secure_storage — lock_type, the hashed PIN/security-answer,
-  // the security-question prompt, and biometric_enabled are all
-  // columns already defined on that table. No new table, no new
-  // storage mechanism, no migration needed.
   getIt.registerLazySingleton<LockLocalDataSource>(
     () => LockLocalDataSourceImpl(getIt<AppDatabase>()),
   );
@@ -549,8 +443,6 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => app_lock_usecase.SetLockType(getIt<AppLockRepository>()),
   );
-  // Independent of SetLockType — flips biometric_enabled without
-  // touching lock_type. See SetBiometricEnabled's doc comment.
   getIt.registerLazySingleton(
     () => SetBiometricEnabled(getIt<AppLockRepository>()),
   );
@@ -565,12 +457,6 @@ Future<void> configureDependencies() async {
     () => VerifySecurityAnswer(getIt<AppLockRepository>()),
   );
 
-  // Lazy singleton, NOT a factory — LockBloc must persist for the
-  // app's entire lifetime (mirrors AppThemeCubit just above): both
-  // main.dart's LoadLockConfig dispatch at startup and LockGate's
-  // BlocConsumer need to be reading and reacting to the same instance.
-  // A factory here would silently hand LockGate a brand-new, never-
-  // loaded bloc instance the moment it's built.
   getIt.registerLazySingleton(
     () => LockBloc(
       getLockConfig: getIt<GetLockConfig>(),
@@ -590,45 +476,18 @@ Future<void> configureDependencies() async {
   );
 
   // --- onboarding ---
-  // Uses SharedPreferences, not the app_settings table — this is a
-  // one-shot device flag, not app data that belongs alongside
-  // reminders/theme/lock config. No AppDatabase dependency, so
-  // nothing here needs the database to be open first (unlike most
-  // other lazy singletons above).
   getIt.registerLazySingleton(() => const OnboardingLocalDataSource());
-  // Lazy singleton: read from app_router.dart's `initialLocation`
-  // logic once per app start, not per-widget-build — a factory would
-  // work too since this use case has no internal state, but
-  // lazySingleton avoids reconstructing it pointlessly on every cold
-  // start check.
   getIt.registerLazySingleton(
     () => CheckOnboardingStatus(getIt<OnboardingLocalDataSource>()),
   );
   getIt.registerLazySingleton(
     () => CompleteOnboarding(getIt<OnboardingLocalDataSource>()),
   );
-  // Factory, not a singleton — mirrors ReminderSettingsBloc/
-  // CloudBackupBloc: onboarding is only ever shown once per real
-  // user, but a factory keeps this consistent with every other
-  // screen-scoped bloc in the app and avoids a stale
-  // scrollPosition/currentPage surviving if onboarding were ever
-  // re-entered (e.g. a future "replay onboarding" debug/support
-  // option).
   getIt.registerFactory(
     () => OnboardingBloc(completeOnboarding: getIt<CompleteOnboarding>()),
   );
 
   // --- app_update ---
-  // No bloc here, deliberately — unlike onboarding (which has its own
-  // screen and OnboardingBloc), this feature has no dedicated screen
-  // of its own. CheckForUpdate is called directly from the splash's
-  // startup checks (see app_router.dart's `_maybeStartAppUpdate`)
-  // exactly the way CheckOnboardingStatus is, and StartFlexibleUpdate
-  // is called once, fire-and-forget, right after that. If a future
-  // requirement adds real UI beyond the OS-native "update downloaded"
-  // prompt (an in-app banner, a settings-screen "check for updates"
-  // button), give it a bloc then rather than one that has no screen
-  // to serve today.
   getIt.registerLazySingleton(() => const AppUpdateLocalDataSource());
   getIt.registerLazySingleton<AppUpdateRepository>(
     () => AppUpdateRepositoryImpl(getIt<AppUpdateLocalDataSource>()),
@@ -639,28 +498,16 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(
     () => StartFlexibleUpdate(getIt<AppUpdateRepository>()),
   );
-    // --- ads ---
-  // Cross-cutting like NetworkInfo just above — every BannerAdWidget
-  // instance and the Settings toggle both read/write the same
-  // singleton's ValueNotifier, regardless of which tab/screen they're
-  // on.
+
+  // --- ads ---
   getIt.registerLazySingleton<AdsPreferenceService>(
     () => AdsPreferenceService(),
   );
-
-  // Full-screen ad shown after saving a diary entry (max once per
-  // calendar day). Reads AdsPreferenceService so the "Show Ads" switch
-  // also turns this off.
   getIt.registerLazySingleton<InterstitialAdService>(
     () => InterstitialAdService(getIt<AdsPreferenceService>()),
   );
 
   // --- plus (Bubimo Plus: Google Play Billing) ---
-  // PlusIapDataSource is the ONLY class that touches the
-  // in_app_purchase plugin; it must be a singleton because it owns the
-  // one subscription to Google's purchase stream. PlusLocalDataSource
-  // caches the last verified entitlement in SharedPreferences (not the
-  // SQLite database, so a restored backup can never carry Plus over).
   getIt.registerLazySingleton(() => PlusIapDataSource());
   getIt.registerLazySingleton(() => PlusLocalDataSource());
   getIt.registerLazySingleton<PlusRepository>(
@@ -679,11 +526,6 @@ Future<void> configureDependencies() async {
     () => WatchPlusPurchaseOutcomes(getIt<PlusRepository>()),
   );
 
-  // Lazy singleton, NOT a factory — same reasoning as LockBloc /
-  // AppThemeCubit: every gate in the app (themes, backups, export,
-  // ads) reads this one shared instance, main.dart loads it before
-  // runApp, and it must keep listening to Google's purchase stream for
-  // the app's whole lifetime.
   getIt.registerLazySingleton(
     () => PlusBloc(
       getCachedPlusStatus: getIt<GetCachedPlusStatus>(),
@@ -693,5 +535,4 @@ Future<void> configureDependencies() async {
       watchPlusPurchaseOutcomes: getIt<WatchPlusPurchaseOutcomes>(),
     ),
   );
-  getIt.registerLazySingleton<ReviewPromptService>(() => ReviewPromptService());
 }

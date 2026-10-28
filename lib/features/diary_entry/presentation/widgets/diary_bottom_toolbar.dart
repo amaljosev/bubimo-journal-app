@@ -69,17 +69,6 @@ class _ToolbarSnapshot {
       return current?.value == attr.value;
     }
 
-    String? alignValue = attrs[quill.Attribute.align.key]?.value as String?;
-    if (alignValue == null && controller.document.root.children.isNotEmpty) {
-      final firstNode = controller.document.root.children.first;
-      if (firstNode is quill.Line) {
-        alignValue = firstNode
-            .style
-            .attributes[quill.Attribute.align.key]
-            ?.value as String?;
-      }
-    }
-
     return _ToolbarSnapshot(
       hasSelection: !controller.selection.isCollapsed,
       hasUndo: controller.hasUndo,
@@ -88,7 +77,8 @@ class _ToolbarSnapshot {
       isItalic: attrs.containsKey(quill.Attribute.italic.key),
       isUnderline: attrs.containsKey(quill.Attribute.underline.key),
       isStrikeThrough: attrs.containsKey(quill.Attribute.strikeThrough.key),
-      alignment: alignValue ?? 'left',
+      alignment:
+          (attrs[quill.Attribute.align.key]?.value as String?) ?? 'left',
       fontSize: attrs[quill.Attribute.size.key]?.value as String?,
       hasColor: attrs.containsKey(quill.Attribute.color.key),
       isUl: isAttrActive(quill.Attribute.ul),
@@ -153,6 +143,27 @@ class _ToolbarSnapshot {
   );
 }
 
+/// Applies paragraph alignment across all lines/blocks in [controller]
+/// as well as the current selection, then notifies [onAlignmentChanged]
+/// so the title field stays in sync.
+void _applyAlignmentToWholeDocument(
+  quill.QuillController controller,
+  quill.Attribute alignment,
+  ValueChanged<String> onAlignmentChanged,
+) {
+  final value = (alignment.value as String?) ?? 'left';
+  final targetAttr = alignment == quill.Attribute.leftAlignment
+      ? quill.Attribute.clone(quill.Attribute.align, null)
+      : alignment;
+
+  final length = controller.document.length;
+  if (length > 0) {
+    controller.formatText(0, length, targetAttr);
+  }
+  controller.formatSelection(targetAttr);
+  onAlignmentChanged(value);
+}
+
 class DiaryBottomToolbar extends StatefulWidget {
   final quill.QuillController controller;
   final FocusNode editorFocusNode;
@@ -195,8 +206,10 @@ class DiaryBottomToolbar extends StatefulWidget {
 
 class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   static const double _barHeight = 56;
-  static const double _sliderHeight = 52;
-  static const double totalHeight = _barHeight + 24;
+  static const double _sliderHeight = 48;
+
+  static const double totalHeight = _barHeight + 28;
+
   static const Duration _tapLockDuration = Duration(milliseconds: 500);
 
   late final ValueNotifier<_ToolbarSnapshot> _snapshotNotifier;
@@ -260,6 +273,7 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       _activePanel = _ActivePanel.none;
       widget.onPanelRequested(null);
     }
+
     setState(() {
       _activeSlider = (_activeSlider == slider) ? _ActiveSlider.none : slider;
     });
@@ -301,7 +315,7 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       (_) => _TextFormatPanel(
         controller: widget.controller,
         snapshotListenable: _snapshotNotifier,
-        onAlignmentSelected: _applyAlignmentToWholeDocument,
+        onAlignmentChanged: widget.onAlignmentChanged,
         onBoldChanged: widget.onBoldChanged,
         onItalicChanged: widget.onItalicChanged,
         onUnderlineChanged: widget.onUnderlineChanged,
@@ -380,26 +394,12 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
     final nowActive = !currentlyActive;
     final targetAttr =
         currentlyActive ? quill.Attribute.clone(attribute, null) : attribute;
+
     if (length > 0) {
       widget.controller.formatText(0, length, targetAttr);
     }
     widget.controller.formatSelection(targetAttr);
     onChanged(nowActive);
-  }
-
-  /// Applies [alignment] across every line (`\n`) in the entire Quill
-  /// document as well as reporting it to the parent page for the Title field.
-  void _applyAlignmentToWholeDocument(quill.Attribute alignment) {
-    final value = (alignment.value as String?) ?? 'left';
-    final targetAttr = alignment == quill.Attribute.leftAlignment
-        ? quill.Attribute.clone(quill.Attribute.align, null)
-        : alignment;
-
-    final length = widget.controller.document.length;
-    if (length > 0) {
-      widget.controller.formatText(0, length, targetAttr);
-    }
-    widget.onAlignmentChanged(value);
   }
 
   void _cycleAlignment(String currentAlignment) {
@@ -409,7 +409,11 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
       'right' => 3,
       _ => 0,
     };
-    _applyAlignmentToWholeDocument(_alignmentCycle[nextIndex]);
+    _applyAlignmentToWholeDocument(
+      widget.controller,
+      _alignmentCycle[nextIndex],
+      widget.onAlignmentChanged,
+    );
   }
 
   void _cycleFontSize(String? currentFontSize) {
@@ -459,45 +463,67 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return SafeArea(
       child: Align(
         alignment: Alignment.bottomCenter,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerLowest,
-              borderRadius: BorderRadius.circular(ThemeRadii.xxl),
-              border: Border.all(
-                color: colorScheme.outlineVariant.withValues(alpha: 0.45),
-              ),
+              color: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(28),
+              // Borderless floating elevation using dual ambient + contact shadows
               boxShadow: [
                 BoxShadow(
-                  color: colorScheme.shadow.withValues(alpha: 0.10),
-                  blurRadius: 24,
-                  offset: const Offset(0, 6),
+                  color: colorScheme.shadow.withValues(
+                    alpha: isDark ? 0.38 : 0.14,
+                  ),
+                  blurRadius: 28,
+                  spreadRadius: 0,
+                  offset: const Offset(0, 10),
+                ),
+                BoxShadow(
+                  color: colorScheme.shadow.withValues(
+                    alpha: isDark ? 0.22 : 0.06,
+                  ),
+                  blurRadius: 8,
+                  spreadRadius: -1,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(ThemeRadii.xxl),
+              borderRadius: BorderRadius.circular(28),
               child: ValueListenableBuilder<_ToolbarSnapshot>(
                 valueListenable: _snapshotNotifier,
                 builder: (context, snapshot, _) {
+                  final showSlider =
+                      !snapshot.hasSelection &&
+                      _activeSlider != _ActiveSlider.none;
+
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Hide-and-Seek Sliding Tray (Borderless soft floating inner pill)
                       AnimatedSize(
                         duration: const Duration(milliseconds: 260),
                         curve: Curves.easeOutCubic,
                         alignment: Alignment.bottomCenter,
-                        child: (!snapshot.hasSelection &&
-                                _activeSlider != _ActiveSlider.none)
-                            ? Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SizedBox(
+                        child: showSlider
+                            ? Padding(
+                                padding: const EdgeInsets.fromLTRB(6, 6, 6, 0),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.primary.withValues(
+                                      alpha: isDark ? 0.12 : 0.06,
+                                    ),
+                                    borderRadius: BorderRadius.circular(22),
+                                  ),
+                                  child: SizedBox(
                                     height: _sliderHeight,
                                     child: AnimatedSwitcher(
                                       duration: const Duration(
@@ -507,7 +533,7 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
                                       switchOutCurve: Curves.easeInCubic,
                                       transitionBuilder: (child, animation) {
                                         final slide = Tween<Offset>(
-                                          begin: const Offset(0.08, 0.25),
+                                          begin: const Offset(0.06, 0.22),
                                           end: Offset.zero,
                                         ).animate(animation);
                                         return FadeTransition(
@@ -585,16 +611,12 @@ class DiaryBottomToolbarState extends State<DiaryBottomToolbar> {
                                             ),
                                     ),
                                   ),
-                                  Divider(
-                                    height: 1,
-                                    thickness: 1,
-                                    color: colorScheme.outlineVariant
-                                        .withValues(alpha: 0.35),
-                                  ),
-                                ],
+                                ),
                               )
                             : const SizedBox.shrink(),
                       ),
+
+                      // Primary Floating Bar
                       SizedBox(
                         height: _barHeight,
                         child: AnimatedSwitcher(
@@ -694,7 +716,7 @@ class _PrimaryCategoryRow extends StatelessWidget {
               ),
             ],
           ),
-          const _ToolbarDivider(),
+          const _ToolbarDotSeparator(),
           Expanded(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -777,7 +799,7 @@ class _TextOptionsSlider extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -800,7 +822,7 @@ class _TextOptionsSlider extends StatelessWidget {
             isActive: snapshot.fontSize != null,
             onPressed: onCycleFontSize,
           ),
-          const _ToolbarDivider(),
+          const _ToolbarDotSeparator(),
           _ToolbarIconButton(
             icon: Icons.format_bold_rounded,
             tooltip: 'Bold',
@@ -826,7 +848,7 @@ class _TextOptionsSlider extends StatelessWidget {
             isActive: snapshot.alignment != 'left',
             onPressed: onCycleAlignment,
           ),
-          const _ToolbarDivider(),
+          const _ToolbarDotSeparator(),
           _ToolbarIconButton(
             icon: Icons.format_list_bulleted_rounded,
             tooltip: 'Lists',
@@ -870,7 +892,7 @@ class _ImageOptionsSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
       child: Row(
         children: [
           Expanded(
@@ -911,10 +933,10 @@ class _SlideActionPill extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Material(
-      color: colorScheme.primary.withValues(alpha: 0.10),
-      borderRadius: BorderRadius.circular(ThemeRadii.lg),
+      color: colorScheme.primary.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
-        borderRadius: BorderRadius.circular(ThemeRadii.lg),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -968,16 +990,16 @@ class _CategoryToggleButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        borderRadius: BorderRadius.circular(ThemeRadii.md),
+        borderRadius: BorderRadius.circular(18),
         onTap: onPressed,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
           height: 38,
-          padding: EdgeInsets.symmetric(horizontal: isOpen ? 12 : 10),
+          padding: EdgeInsets.symmetric(horizontal: isOpen ? 14 : 10),
           decoration: BoxDecoration(
             color: isOpen ? colorScheme.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(ThemeRadii.md),
+            borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -997,7 +1019,7 @@ class _CategoryToggleButton extends StatelessWidget {
                     ),
                   if (hasActiveDot)
                     Positioned(
-                      right: -3,
+                      right: -4,
                       top: -2,
                       child: Container(
                         width: 6,
@@ -1056,12 +1078,12 @@ class _ToolbarIconButton extends StatelessWidget {
     final isEnabled = onPressed != null;
     final color = isEnabled
         ? theme.colorScheme.primary
-        : theme.colorScheme.onSurface.withValues(alpha: 0.32);
+        : theme.colorScheme.onSurface.withValues(alpha: 0.28);
 
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        borderRadius: BorderRadius.circular(ThemeRadii.sm),
+        borderRadius: BorderRadius.circular(14),
         onTap: onPressed,
         child: AnimatedContainer(
           duration: ThemeDurations.fast,
@@ -1073,7 +1095,7 @@ class _ToolbarIconButton extends StatelessWidget {
             color: isActive
                 ? theme.colorScheme.primary.withValues(alpha: 0.14)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(ThemeRadii.sm),
+            borderRadius: BorderRadius.circular(14),
           ),
           child: icon != null
               ? Icon(icon, size: 21, color: color)
@@ -1090,18 +1112,25 @@ class _ToolbarIconButton extends StatelessWidget {
   }
 }
 
-class _ToolbarDivider extends StatelessWidget {
-  const _ToolbarDivider();
+/// Subtle dot separator instead of a hard vertical line, preserving the
+/// borderless floating feel.
+class _ToolbarDotSeparator extends StatelessWidget {
+  const _ToolbarDotSeparator();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 22,
-      margin: const EdgeInsets.symmetric(horizontal: ThemeSpacing.xs),
-      color: Theme.of(
-        context,
-      ).colorScheme.outlineVariant.withValues(alpha: 0.5),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Container(
+        width: 4,
+        height: 4,
+        decoration: BoxDecoration(
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurfaceVariant.withValues(alpha: 0.28),
+          shape: BoxShape.circle,
+        ),
+      ),
     );
   }
 }
@@ -1157,7 +1186,7 @@ const List<({String label, String? value})> _fontSizeOptions = [
 class _TextFormatPanel extends StatelessWidget {
   final quill.QuillController controller;
   final ValueListenable<_ToolbarSnapshot> snapshotListenable;
-  final ValueChanged<quill.Attribute> onAlignmentSelected;
+  final ValueChanged<String> onAlignmentChanged;
   final ValueChanged<bool> onBoldChanged;
   final ValueChanged<bool> onItalicChanged;
   final ValueChanged<bool> onUnderlineChanged;
@@ -1166,7 +1195,7 @@ class _TextFormatPanel extends StatelessWidget {
   const _TextFormatPanel({
     required this.controller,
     required this.snapshotListenable,
-    required this.onAlignmentSelected,
+    required this.onAlignmentChanged,
     required this.onBoldChanged,
     required this.onItalicChanged,
     required this.onUnderlineChanged,
@@ -1232,7 +1261,11 @@ class _TextFormatPanel extends StatelessWidget {
                           tooltip: (alignment.value as String?) ?? 'left',
                           isActive:
                               (alignment.value ?? 'left') == snapshot.alignment,
-                          onPressed: () => onAlignmentSelected(alignment),
+                          onPressed: () => _applyAlignmentToWholeDocument(
+                            controller,
+                            alignment,
+                            onAlignmentChanged,
+                          ),
                         ),
                       ),
                   ],
@@ -1337,11 +1370,6 @@ class _ColorRoleSelector extends StatelessWidget {
                 ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(ThemeRadii.sm),
-                  side: BorderSide(
-                    color: theme.colorScheme.outlineVariant.withValues(
-                      alpha: 0.6,
-                    ),
-                  ),
                 ),
                 selectedColor: theme.colorScheme.primary,
                 backgroundColor: theme.colorScheme.surfaceContainerHighest,
@@ -1455,13 +1483,10 @@ class _RgbaColorSwatch extends StatelessWidget {
         decoration: BoxDecoration(
           color: color.toColor(),
           shape: BoxShape.circle,
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
-          ),
           boxShadow: [
             BoxShadow(
-              color: theme.colorScheme.shadow.withValues(alpha: 0.12),
-              blurRadius: 4,
+              color: theme.colorScheme.shadow.withValues(alpha: 0.14),
+              blurRadius: 6,
               offset: const Offset(0, 2),
             ),
           ],
@@ -1488,9 +1513,6 @@ class _ClearColorSwatch extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
           shape: BoxShape.circle,
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
-          ),
         ),
         child: Icon(
           Icons.format_color_reset_rounded,
@@ -1638,7 +1660,7 @@ class _SelectionToolsRow extends StatelessWidget {
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1648,7 +1670,7 @@ class _SelectionToolsRow extends StatelessWidget {
             isActive: snapshot.hasAnyCharacterStyleExcludingColor,
             onPressed: onOpenStylePicker,
           ),
-          const _ToolbarDivider(),
+          const _ToolbarDotSeparator(),
           _ToolbarIconButton(
             icon: Icons.format_color_text_rounded,
             tooltip: 'Text color',

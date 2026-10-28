@@ -156,6 +156,10 @@ class _DiaryEntryViewPageState extends State<DiaryEntryViewPage> {
   Future<void> _requestReviewSoon() async {
     await Future<void>.delayed(const Duration(milliseconds: 1200));
     if (!mounted || _isDeleting) return;
+
+    final isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? false;
+    if (!isCurrentRoute) return;
+
     await _reviewPromptService.onEntryOpened();
   }
 

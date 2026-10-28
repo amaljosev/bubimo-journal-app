@@ -1,52 +1,77 @@
+// lib/core/services/review_prompt_service.dart
+
+import 'package:flutter/foundation.dart';
 import 'package:in_app_review/in_app_review.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../network/network_info.dart';
+
 /// Decides when to show the Play in-app review dialog.
 ///
-/// The API can't report whether the user rated, so we track our own
-/// attempts: at most one prompt per calendar day, [maxPrompts] total.
+/// Triggers on the 1st open, and every subsequent odd-numbered open
+/// (1st, 3rd, 5th, 7th, etc.) if online and available.
 class ReviewPromptService {
-  /// Entry opens required before the first prompt, so brand-new users
-  /// aren't asked before they've actually used the app.
-  static const int minViewsBeforeFirstPrompt = 3;
-
-  /// Give up after this many attempts.
-  static const int maxPrompts = 3;
-
   static const _kViewCount = 'review_entry_view_count';
-  static const _kPromptCount = 'review_prompt_count';
-  static const _kLastPromptDay = 'review_last_prompt_day';
+  static const _kLastPromptedView = 'review_last_prompted_view';
 
   final InAppReview _inAppReview;
+  final NetworkInfo _networkInfo;
 
-  ReviewPromptService([InAppReview? inAppReview])
-    : _inAppReview = inAppReview ?? InAppReview.instance;
+  bool _isRequesting = false;
 
-  /// Call each time the entry preview screen is opened.
+  ReviewPromptService({
+    required this._networkInfo,
+    InAppReview? inAppReview,
+  }) : _inAppReview = inAppReview ?? InAppReview.instance;
+
+  /// Call each time an entry is opened.
   Future<void> onEntryOpened() async {
-    final prefs = await SharedPreferences.getInstance();
+    if (_isRequesting) return;
+    _isRequesting = true;
 
-    final views = (prefs.getInt(_kViewCount) ?? 0) + 1;
-    await prefs.setInt(_kViewCount, views);
-    if (views < minViewsBeforeFirstPrompt) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    final promptCount = prefs.getInt(_kPromptCount) ?? 0;
-    if (promptCount >= maxPrompts) return;
+      final views = (prefs.getInt(_kViewCount) ?? 0) + 1;
+      await prefs.setInt(_kViewCount, views);
 
-    // Already asked today -> wait for another day.
-    final today = _dayKey(DateTime.now());
-    if (prefs.getString(_kLastPromptDay) == today) return;
+      // Only prompt on odd-numbered opens (1, 3, 5, 7...)
+      if (views % 2 == 0) return;
 
-    if (!await _inAppReview.isAvailable()) return;
+      // Prevent duplicate triggers for the same view count
+      final lastPromptedView = prefs.getInt(_kLastPromptedView) ?? 0;
+      if (views <= lastPromptedView) return;
 
-    // Record before requesting so a rapid re-open can't double-fire.
-    await prefs.setString(_kLastPromptDay, today);
-    await prefs.setInt(_kPromptCount, promptCount + 1);
+      // Check internet connection (Play Core requires network)
+      final isOnline = await _networkInfo.isConnected;
+      if (!isOnline) return;
 
-    await _inAppReview.requestReview();
+      final available = await _inAppReview.isAvailable();
+      if (!available) return;
+
+      // Save state before requesting
+      await prefs.setInt(_kLastPromptedView, views);
+
+      await _inAppReview.requestReview();
+    } catch (e, st) {
+      debugPrint('[ReviewPromptService] requestReview failed: $e\n$st');
+    } finally {
+      _isRequesting = false;
+    }
   }
 
-  String _dayKey(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
+  Future<void> openStoreListing() async {
+    try {
+      await _inAppReview.openStoreListing();
+    } catch (e, st) {
+      debugPrint('[ReviewPromptService] openStoreListing failed: $e\n$st');
+    }
+  }
+
+  @visibleForTesting
+  Future<void> resetCountersForTesting() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kViewCount);
+    await prefs.remove(_kLastPromptedView);
+  }
 }
