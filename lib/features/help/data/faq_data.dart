@@ -94,14 +94,14 @@ class FaqData {
           'time. You\'ll also set a security question in case you '
           'forget your PIN or pattern.',
     ),
-    FaqItem(
-      category: FaqCategory.privacyAndLock,
-      question: 'I forgot my PIN — what do I do?',
-      answer:
-          'On the unlock screen, tap "Forgot PIN" '
-          'and answer your security question to regain access and set '
-          'a new one.',
-    ),
+    // FaqItem(
+    //   category: FaqCategory.privacyAndLock,
+    //   question: 'I forgot my PIN — what do I do?',
+    //   answer:
+    //       'On the unlock screen, tap "Forgot PIN" '
+    //       'and answer your security question to regain access and set '
+    //       'a new one.',
+    // ),
     FaqItem(
       category: FaqCategory.privacyAndLock,
       question: 'How do I switch from one lock method to another?',

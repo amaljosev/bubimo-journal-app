@@ -127,7 +127,7 @@ class _SplashPageState extends State<SplashPage>
                 );
               },
               child: Image.asset(
-                'assets/icons/bubimo_icon.png',
+                'assets/icons/bubimo.png',
                 width: 96,
                 height: 96,
               ),

@@ -1,5 +1,5 @@
 class AppConstants {
-  static const versionCode = '1.2.3';
+  static const versionCode = '1.2.4';
   static const String supportMail = 'amaljosevofficial@gmail.com';
 
   static const String privacyPolicyUrl =

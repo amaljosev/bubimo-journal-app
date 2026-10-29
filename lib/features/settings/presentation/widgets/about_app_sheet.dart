@@ -41,7 +41,7 @@ class AboutAppSheet extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: Image.asset(
-                'assets/icons/bubimo_icon.png',
+                'assets/icons/bubimo.png',
                 width: 72,
                 height: 72,
                 fit: BoxFit.cover,

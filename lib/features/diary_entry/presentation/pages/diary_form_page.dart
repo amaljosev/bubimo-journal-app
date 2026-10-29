@@ -126,7 +126,10 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   bool _controllersSynced = false;
 
   // Guards the post-save flow (ad, then pop) so it runs only once even
-  // if the success state were delivered to the listener again.
+  // if the success state were delivered to the listener again. Also
+  // keeps the Save button locked (spinner) while that flow runs, since
+  // waiting for an ad can take a few seconds and a second tap would
+  // otherwise save the entry twice.
   bool _isFinishingSave = false;
 
   // Coalesces rapid keystrokes within the same frame into a single
@@ -256,7 +259,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   /// this — [InterstitialAdService.showIfEligible] never throws.
   Future<void> _finishSave() async {
     if (_isFinishingSave) return;
-    _isFinishingSave = true;
+    setState(() => _isFinishingSave = true);
     final ads = getIt<InterstitialAdService>();
 
     if (await ads.shouldShowNotice()) {
@@ -1226,7 +1229,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                 padding: const EdgeInsets.only(right: 12),
                 child: Center(
                   child: FilledButton(
-                    onPressed: (canSave && !state.isSubmitting)
+                    onPressed: (canSave && !state.isSubmitting && !_isFinishingSave)
                         ? () => context.read<DiaryFormBloc>().add(
                             const DiaryFormSubmitted(),
                           )
@@ -1237,7 +1240,7 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                     ),
-                    child: state.isSubmitting
+                    child: (state.isSubmitting || _isFinishingSave)
                         ? const SizedBox(
                             width: 18,
                             height: 18,

@@ -1,4 +1,4 @@
-// lib/core/ads/interstitial_ad_service.dart
+// lib/features/ads/data/services/interstitial_ad_service.dart
 
 import 'dart:async';
 
@@ -25,11 +25,20 @@ import 'ads_preference_service.dart';
 ///   immediately if no ad is shown — and never throws, so saving can
 ///   never be blocked by an ad problem.
 ///
+/// Loading is resilient on purpose, because a production ad unit does
+/// not always fill the first request (unlike Google's test units):
+/// - [preload] retries a few times with a growing delay.
+/// - If no ad is ready at save time (slow network, every retry failed,
+///   or the form was opened offline and the user is online now),
+///   [showIfEligible] requests one right then and waits up to
+///   [_saveWaitTimeout] for it. An ad that arrives later is kept for
+///   the next save.
+///
 /// An ad is skipped (silently) when: "Show Ads" is off in Settings, the
 /// notice hasn't been seen yet, an ad was already shown (or the notice
-/// was seen) today, or no ad is loaded yet. The daily limit is only
-/// used up when an ad was actually shown, so a failed load doesn't
-/// cost the user's day.
+/// was seen) today, or no ad could be loaded in time. The daily limit
+/// is only used up when an ad was actually shown, so a save without an
+/// ad (offline, no fill) leaves today's slot for the next save.
 class InterstitialAdService {
   InterstitialAdService(this._adsPreference);
 
@@ -42,9 +51,24 @@ class InterstitialAdService {
   /// earlier so we never try to show a stale one.
   static const _maxAdAge = Duration(minutes: 55);
 
+  /// Requests per [preload]; the wait before retry N is
+  /// `_retryDelay * N` (5s, then 10s).
+  static const _maxLoadAttempts = 3;
+  static const _retryDelay = Duration(seconds: 5);
+
+  /// A request whose callback never fires is treated as failed, so one
+  /// stuck request can't block loading for the rest of the session.
+  static const _loadTimeout = Duration(seconds: 15);
+
+  /// Longest the save flow waits for an ad that isn't ready yet.
+  static const _saveWaitTimeout = Duration(seconds: 3);
+
   InterstitialAd? _ad;
   DateTime? _loadedAt;
-  bool _isLoading = false;
+
+  /// The load currently running, if any. Shared by every caller so
+  /// concurrent [preload] calls never start duplicate requests.
+  Future<void>? _inFlightLoad;
 
   /// Device-local calendar date as `yyyy-MM-dd` — changes at midnight.
   String _todayKey() {
@@ -85,54 +109,91 @@ class InterstitialAdService {
   }
 
   /// Loads an ad in the background if one is worth loading. Safe to
-  /// call repeatedly.
-  Future<void> preload() async {
-    if (!_adsPreference.adsEnabled.value) return;
-    if (_ad != null || _isLoading) return;
-    _isLoading = true;
+  /// call repeatedly: it joins a load already in progress and does
+  /// nothing when a fresh ad is already waiting.
+  Future<void> preload() {
+    if (!_adsPreference.adsEnabled.value) return Future<void>.value();
+    _disposeIfExpired();
+    if (_ad != null) return Future<void>.value();
+    return _inFlightLoad ??= _loadWithRetry().whenComplete(
+      () => _inFlightLoad = null,
+    );
+  }
+
+  Future<void> _loadWithRetry() async {
+    // No point requesting an ad that can't be shown today.
+    if (!await _canServeAdToday()) return;
+
+    for (var attempt = 1; attempt <= _maxLoadAttempts; attempt++) {
+      if (await _requestAd()) return;
+      if (attempt < _maxLoadAttempts) {
+        await Future<void>.delayed(_retryDelay * attempt);
+      }
+    }
+  }
+
+  /// Makes one ad request. Completes with `true` once an ad is stored in
+  /// [_ad], or `false` on failure or timeout. Never throws.
+  Future<bool> _requestAd() async {
+    final result = Completer<bool>();
 
     try {
-      // No point requesting an ad that can't be shown today.
-      if (!await _canServeAdToday()) {
-        _isLoading = false;
-        return;
-      }
-
       await InterstitialAd.load(
         adUnitId: AdUnitIds.interstitial,
         request: const AdRequest(),
         adLoadCallback: InterstitialAdLoadCallback(
           onAdLoaded: (ad) {
+            _ad?.dispose();
             _ad = ad;
             _loadedAt = DateTime.now();
-            _isLoading = false;
+            result.complete(true);
           },
           onAdFailedToLoad: (error) {
-            debugPrint('InterstitialAdService: failed to load ad: $error');
-            _ad = null;
-            _isLoading = false;
+            debugPrint(
+              'InterstitialAdService: failed to load ad: '
+              'code=${error.code} message=${error.message}',
+            );
+            result.complete(false);
           },
         ),
       );
     } catch (e) {
-      debugPrint('InterstitialAdService: preload error: $e');
-      _isLoading = false;
+      debugPrint('InterstitialAdService: load error: $e');
+      return false;
+    }
+
+    return result.future.timeout(_loadTimeout, onTimeout: () => false);
+  }
+
+  /// Discards the loaded ad if it is too old to show safely.
+  void _disposeIfExpired() {
+    final loadedAt = _loadedAt;
+    if (loadedAt == null) return;
+    if (DateTime.now().difference(loadedAt) > _maxAdAge) {
+      _ad?.dispose();
+      _ad = null;
+      _loadedAt = null;
     }
   }
 
-  /// Returns the loaded ad if it's still fresh, otherwise discards it.
+  /// Hands over the loaded ad if it's still fresh (and forgets it, since
+  /// an interstitial can be shown only once), otherwise returns null.
   InterstitialAd? _takeReadyAd() {
+    _disposeIfExpired();
     final ad = _ad;
-    final loadedAt = _loadedAt;
     _ad = null;
     _loadedAt = null;
-    if (ad == null) return null;
-    if (loadedAt == null ||
-        DateTime.now().difference(loadedAt) > _maxAdAge) {
-      ad.dispose();
-      return null;
-    }
     return ad;
+  }
+
+  /// The ad to show right now: the preloaded one, or — if none is ready
+  /// — a fresh request awaited for at most [_saveWaitTimeout].
+  Future<InterstitialAd?> _obtainAd() async {
+    final ready = _takeReadyAd();
+    if (ready != null) return ready;
+
+    await preload().timeout(_saveWaitTimeout, onTimeout: () {});
+    return _takeReadyAd();
   }
 
   /// Shows the ad if allowed. Completes when the ad is dismissed, or
@@ -142,7 +203,7 @@ class InterstitialAdService {
       if (!_adsPreference.adsEnabled.value) return;
       if (!await _canServeAdToday()) return;
 
-      final ad = _takeReadyAd();
+      final ad = await _obtainAd();
       if (ad == null) return;
 
       final dismissed = Completer<void>();
