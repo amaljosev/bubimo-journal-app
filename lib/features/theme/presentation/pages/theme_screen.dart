@@ -54,23 +54,6 @@ class _ThemeScreenState extends State<ThemeScreen>
     if (_isNavigatingToCustomThemeScreen) return;
     _isNavigatingToCustomThemeScreen = true;
 
-    // Custom themes are a Plus feature. Free users see the paywall; the
-    // navigation flag above stays set meanwhile so a double-tap can't
-    // stack two paywalls.
-    final allowed = await PlusGate.require(context, PlusFeature.customThemes);
-    if (!allowed) {
-      if (context.mounted) {
-        setState(() => _isNavigatingToCustomThemeScreen = false);
-      } else {
-        _isNavigatingToCustomThemeScreen = false;
-      }
-      return;
-    }
-    if (!context.mounted) {
-      _isNavigatingToCustomThemeScreen = false;
-      return;
-    }
-
     final result = await context.push<bool>(AppRoutes.customThemeScreen);
 
     if (context.mounted) {
@@ -90,20 +73,6 @@ class _ThemeScreenState extends State<ThemeScreen>
   ) async {
     if (_isNavigatingToCustomThemeScreen) return;
     _isNavigatingToCustomThemeScreen = true;
-
-    final allowed = await PlusGate.require(context, PlusFeature.customThemes);
-    if (!allowed) {
-      if (context.mounted) {
-        setState(() => _isNavigatingToCustomThemeScreen = false);
-      } else {
-        _isNavigatingToCustomThemeScreen = false;
-      }
-      return;
-    }
-    if (!context.mounted) {
-      _isNavigatingToCustomThemeScreen = false;
-      return;
-    }
 
     final result = await context.push<bool>(
       AppRoutes.customThemeScreen,
@@ -509,7 +478,7 @@ class _CustomThemesTab extends StatelessWidget {
               onPressed: (state.canAddCustomTheme && canNavigate)
                   ? onAdd
                   : null,
-              icon: Icon(isPlus ? Icons.add : Icons.lock_outline_rounded),
+              icon: const Icon(Icons.add),
               label: Text(
                 state.canAddCustomTheme
                     ? 'Add Custom Theme'
@@ -545,6 +514,7 @@ class _CustomThemesTab extends StatelessWidget {
                     theme: theme,
                     isActive: theme.id == state.activeThemeId,
                     isEnabled: !state.isActionInProgress,
+                    isLocked: !isPlus,
                     onApply: () async {
                       final allowed = await PlusGate.require(
                         context,

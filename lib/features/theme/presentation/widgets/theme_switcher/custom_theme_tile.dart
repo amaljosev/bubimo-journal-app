@@ -21,6 +21,11 @@ class CustomThemeTile extends StatelessWidget {
   final AppThemeData theme;
   final bool isActive;
   final bool isEnabled;
+
+  /// When true (free user), the Apply button shows a lock icon to signal
+  /// that applying a custom theme requires Bubimo Plus. The paywall itself
+  /// is enforced by the caller's [onApply].
+  final bool isLocked;
   final VoidCallback onApply;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -33,6 +38,7 @@ class CustomThemeTile extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.isEnabled = true,
+    this.isLocked = false,
   });
 
   @override
@@ -83,7 +89,17 @@ class CustomThemeTile extends StatelessWidget {
           Expanded(
             child: FilledButton.tonal(
               onPressed: isEnabled && !isActive ? onApply : null,
-              child: Text(isActive ? 'Applied' : 'Apply Theme'),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (isLocked && !isActive) ...[
+                    const Icon(Icons.lock_outline_rounded, size: 18),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(isActive ? 'Applied' : 'Apply Theme'),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),
