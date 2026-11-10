@@ -3,7 +3,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:bubimo/features/ads/presentation/pages/daily_ad_notice_page.dart';
 import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
 import 'package:bubimo/core/utils/background_image_utils.dart';
 import 'package:bubimo/core/utils/overlay_tint_utils.dart';
@@ -258,23 +257,16 @@ class _DiaryFormViewState extends State<_DiaryFormView> {
   /// screen with `true` so it refreshes. An ad problem never blocks
   /// this — [InterstitialAdService.showIfEligible] never throws.
   Future<void> _finishSave() async {
-    if (_isFinishingSave) return;
-    setState(() => _isFinishingSave = true);
-    final ads = getIt<InterstitialAdService>();
+  if (_isFinishingSave) return;
+  setState(() => _isFinishingSave = true);
 
-    if (await ads.shouldShowNotice()) {
-      // First save ever: instead of an ad, show the one-time full-screen
-      // notice. No auto-skip — the user leaves with "Go home". Real ads
-      // start from the next calendar day.
-      if (!mounted) return;
-      await DailyAdNoticePage.show(context);
-      await ads.markNoticeSeen();
-    } else {
-      await ads.showIfEligible();
-    }
-    if (!mounted) return;
-    context.pop(true);
-  }
+  // The entry is already saved at this point. showIfEligible returns
+  // almost instantly when no ad is ready (max ~1s wait).
+  await getIt<InterstitialAdService>().showIfEligible();
+
+  if (!mounted) return;
+  context.pop(true);
+}
 
   @override
   void didChangeDependencies() {

@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:bubimo/features/ads/data/services/ads_preference_service.dart';
 import 'package:bubimo/core/config/secrets.dart';
 import 'package:bubimo/core/router/app_router.dart';
+import 'package:bubimo/features/ads/data/services/interstitial_ad_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,6 +44,7 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      
       await Supabase.initialize(
         url: Secrets.supabaseUrl,
         publishableKey: Secrets.supabaseAnonKey,
@@ -159,6 +161,7 @@ void main() {
       } catch (e) {
         debugPrint('MobileAds failed to initialize: $e');
       }
+      unawaited(getIt<InterstitialAdService>().preload());
 
       // 2. Launch your app
       
